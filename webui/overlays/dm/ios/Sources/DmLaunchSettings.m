@@ -67,6 +67,7 @@ void dm_launch_settings_apply(void) {
         fprintf(stderr, "settings: %s requested=%s effective=%s%s%s\n", keys()[i].UTF8String,
                 requested.UTF8String, effective.UTF8String, reason ? " reason=" : "", reason.UTF8String ?: "");
     }
+    setenv("DM_LAUNCHER", "0", 1);   // the fork's ObjC settings screen is the launcher; keep the upstream Swift launcher out of the way
     setenv("DM_DYNAMIC_RESOLUTION", "1", 1);
     setenv("DM_METALFX_INTERPOLATION", "0", 1);
     fprintf(stderr, "settings: game=%s iOS=%s\n", DM_GAME_ID, UIDevice.currentDevice.systemVersion.UTF8String);

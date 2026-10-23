@@ -3,21 +3,26 @@
 These patches keep fork behavior out of the upstream working tree. They are
 applied only to the staging tree created by `webui/staging.py`.
 
-- Fork base: `233f18f421344fcd3b61559459ef8649d6c38a54`
-- Fork reference: `a8bfd0ddac3a976b770e05db64f3932d29772ce8`
-- Patches were generated with
-  `git diff --no-ext-diff --unified=3 233f18f -- <target>`.
+- Upstream base: `eab15b5a7e339d172ba7cd6b1a298ec3cf1e16b6` (seedds/nxnative main, 2026-10-23)
+- Fork tree: `77dee3dab542d19a76e0cbb7175d3b6726ad275c` (the WebUI/fork commit copied into the sync branch)
+- Hooks commit: `18e488271dd3a0bbd17a7a5d2acadc6b1f648cf1`
+- Patches were regenerated with
+  `git diff --no-ext-diff --unified=3 upstream/main -- <target>` from the ported hooks branch.
+- The sync branch `sync/upstream-20261023` is a vendor drop of upstream `eab15b5`; the fork's previous main (based on `233f18f`) remains the stable branch until this one is validated.
 - `series` lists the patch file and its target. The applier rejects a target
   that differs from the series entry or escapes the tree.
 - Patch files are LF. The source checkout uses CRLF; `webui/diffapply.py`
   normalizes both sides and writes LF into the stage.
 
-## Patch 0009 corrections
+## Patch 0009 notes
 
-The fork's `scripts/build_ipa_from_nsp.py` imported `json` only inside
-`Progress.stage`, while the WebUI launch-defaults block calls `json.loads`
-at module level. Patch 0009 adds a top-level `import json`. It also points the
-macOS target at the moved `webui/build/macos/pack_app.py`.
+The original fork patch added a top-level `import json` because the WebUI
+launch-defaults block used `json` while the module imported it only inside
+`Progress.stage`. Upstream now imports `json` itself; the port keeps the WebUI
+`@NXEVENT` hooks, the macOS target path (`webui/build/macos/pack_app.py`), the
+launch-defaults block and the separate-RomFS block. The rest of the patch is
+rebased onto upstream's newer `build_ipa_from_nsp.py` (derived profiles,
+`--prepare-xcode`, `--language`, `--show-fps`, `--progress json`).
 
 ## Separate RomFS hooks (0008/0009)
 

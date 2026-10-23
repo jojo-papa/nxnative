@@ -1,5 +1,5 @@
 diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
-index 8fdbb42..f75888a 100644
+index 70e0479..6f0a34e 100644
 --- a/dm/gfx/nvn/nvn_mtl.m
 +++ b/dm/gfx/nvn/nvn_mtl.m
 @@ -15,6 +15,7 @@
@@ -10,7 +10,7 @@ index 8fdbb42..f75888a 100644
  #include "nvn_obj.h"
  #include "../tex/nvn_fmt_mtl.h"
  #include "../tex/nvn_deswizzle.h"
-@@ -63,6 +64,7 @@ static NSMutableArray *g_l3_gpu_leaks;
+@@ -70,6 +71,7 @@ static NSMutableArray *g_l3_gpu_leaks;
  static int g_nvn_deswz_gpu;
  static id<MTLCommandQueue> g_q;
  static id<MTL4CommandQueue> g_q4;
@@ -18,7 +18,7 @@ index 8fdbb42..f75888a 100644
  static dispatch_queue_t g_feedback_q;
  static _Atomic uint32_t g_present_qos;
  #define ALLOC_MAX 8
-@@ -75,7 +77,7 @@ static int g_vbuf_cache = 1;   // DM_NVN_VBUF_CACHE=0 restores the uncached path
+@@ -82,7 +84,7 @@ static int g_vbuf_cache = 1;   // DM_NVN_VBUF_CACHE=0 restores the uncached path
  static uint64_t g_vt_addr[31]; static uint32_t g_vt_valid;
  static uint64_t g_vbuf_resolve, g_vbuf_reuse, g_vbuf_set, g_vbuf_skip;
  static id<MTL4ArgumentTable> g_present_args;
@@ -27,7 +27,7 @@ index 8fdbb42..f75888a 100644
  static uint64_t g_present_alloc_fence[3];
  static pthread_mutex_t g_pq_mu = PTHREAD_MUTEX_INITIALIZER;
  static pthread_cond_t g_pq_cv = PTHREAD_COND_INITIALIZER;
-@@ -325,6 +327,11 @@ void mtl_init(void) {
+@@ -335,6 +337,11 @@ void mtl_init(void) {
          if (!g_present_uv[i]) MDIE("failed to create present UV buffer[%d]", i);
          res_add(g_present_uv[i]);
      }
@@ -39,7 +39,7 @@ index 8fdbb42..f75888a 100644
      g_ev = [g_dev newSharedEvent];
      g_keep = [NSMutableArray array];
      g_nvn_deswz_gpu = nvn_deswz_gpu_init(g_dev) == 0;
-@@ -2397,7 +2404,7 @@ static int clear_rect_zero(int i) {
+@@ -2746,7 +2753,7 @@ static int clear_rect_zero(int i) {
  // ================= Shaders / descriptor pool / pipelines / draws =================
  static pthread_mutex_t g_rmu = PTHREAD_MUTEX_INITIALIZER;
  // ---------- Shader mapping table: Switch control section hash → PC metallib (produced by dm/gfx/tools/shader_map.py) ----------
@@ -48,7 +48,7 @@ index 8fdbb42..f75888a 100644
  static NSString *g_shmap_path, *g_msl_dir;
  static NSString *exe_rel(const char *rel) {
      char buf[4096]; uint32_t n = sizeof buf;
-@@ -3063,20 +3070,20 @@ static void state_reset(void) {
+@@ -3712,20 +3719,20 @@ static void state_reset(void) {
  // Other mismatches (integer input with a normalized / half format, float input with an integer format) cannot keep the bit pattern: report once and keep the format.
  static MTLVertexFormat vfmt_for_ct(MTLVertexFormat f, int ct, int nvn_fmt) {
      static const MTLVertexFormat U[] = { MTLVertexFormatUChar, MTLVertexFormatUChar2, MTLVertexFormatUChar3, MTLVertexFormatUChar4, MTLVertexFormatUShort, MTLVertexFormatUShort2, MTLVertexFormatUShort3, MTLVertexFormatUShort4, MTLVertexFormatUInt, MTLVertexFormatUInt2, MTLVertexFormatUInt3, MTLVertexFormatUInt4 };
@@ -73,7 +73,7 @@ index 8fdbb42..f75888a 100644
              { MTLVertexFormatUCharNormalized, 0 }, { MTLVertexFormatCharNormalized, 0 }, { MTLVertexFormatUChar2Normalized, 1 }, { MTLVertexFormatChar2Normalized, 1 },
              { MTLVertexFormatUChar3Normalized, 2 }, { MTLVertexFormatChar3Normalized, 2 }, { MTLVertexFormatUChar4Normalized, 3 }, { MTLVertexFormatChar4Normalized, 3 }, { MTLVertexFormatUChar4Normalized_BGRA, 3 },
              { MTLVertexFormatUShortNormalized, 4 }, { MTLVertexFormatShortNormalized, 4 }, { MTLVertexFormatHalf, 4 }, { MTLVertexFormatUShort2Normalized, 5 }, { MTLVertexFormatShort2Normalized, 5 }, { MTLVertexFormatHalf2, 5 },
-@@ -3085,7 +3092,7 @@ static MTLVertexFormat vfmt_for_ct(MTLVertexFormat f, int ct, int nvn_fmt) {
+@@ -3734,7 +3741,7 @@ static MTLVertexFormat vfmt_for_ct(MTLVertexFormat f, int ct, int nvn_fmt) {
          };
          for (unsigned i = 0; i < sizeof P / sizeof *P; i++) if (P[i].f == f) {
              RED_ONCE(91, "vertex attribute format %#x feeds a %s input: Metal does not allow it and the conversion slots are full; the raw bytes are read with the integer format of the same layout (the bit pattern differs from Maxwell's converted one)", nvn_fmt, ct == NVN_CT_UINT ? "uint" : "int");
@@ -82,7 +82,7 @@ index 8fdbb42..f75888a 100644
          }
      }
      RED_ONCE(66, "vertex attribute format %#x does not match shader input type %s; the bit pattern is not preserved (original format kept)", nvn_fmt, ct == NVN_CT_UINT ? "uint" : ct == NVN_CT_INT ? "int" : "float");
-@@ -3307,8 +3314,8 @@ static MTLVertexFormat vfmt(int f) {
+@@ -3999,8 +4006,8 @@ static MTLVertexFormat vfmt(int f) {
      int ib, is, in = vconv_i2f(f, &ib, &is);   // integers read as floats: the integer format of the same layout (the pipeline reads vconv_bind's conversion)
      if (in) {
          static const MTLVertexFormat U[3][4] = { { MTLVertexFormatUChar, MTLVertexFormatUChar2, MTLVertexFormatUChar3, MTLVertexFormatUChar4 }, { MTLVertexFormatUShort, MTLVertexFormatUShort2, MTLVertexFormatUShort3, MTLVertexFormatUShort4 }, { MTLVertexFormatUInt, MTLVertexFormatUInt2, MTLVertexFormatUInt3, MTLVertexFormatUInt4 } };
@@ -93,7 +93,7 @@ index 8fdbb42..f75888a 100644
      }
      return MTLVertexFormatInvalid;
  }
-@@ -6606,7 +6613,7 @@ void mtl_res_counts(uint32_t tick, const char *why) {
+@@ -7686,7 +7693,7 @@ void mtl_res_counts(uint32_t tick, const char *why) {
  static struct { uint64_t frame; char path[1024]; } g_shotq[SHOTQ_MAX]; static int g_nshotq;
  static pthread_mutex_t g_shotq_mu = PTHREAD_MUTEX_INITIALIZER;
  static int present_encode(id<MTLCommandBuffer> cb, id<MTLTexture> src, id<MTLTexture> dst, const int crop[4]);
@@ -102,7 +102,7 @@ index 8fdbb42..f75888a 100644
  // Game picture needed by the whole-window screenshot (front end window_shot; no longer does drawViewHierarchy on a Metal layer with the display link attached): at the next present, the present thread draws the same frame
  // with the same encoding as the present (present_encode) into an offscreen texture of the same size as the swapchain, and after the GPU finishes hands out a CGImage in the completion callback (the callback does not block the present). Guarded by g_shotq_mu
  static void (^g_grab_cb)(CGImageRef img);
-@@ -6911,7 +6918,7 @@ static int present_encode(id<MTLCommandBuffer> cb, id<MTLTexture> src, id<MTLTex
+@@ -8023,7 +8030,7 @@ static int present_encode(id<MTLCommandBuffer> cb, id<MTLTexture> src, id<MTLTex
      [en endEncoding];
      return 1;
  }
@@ -111,7 +111,7 @@ index 8fdbb42..f75888a 100644
      NSUInteger cx = 0, cy = 0, cw = src.width, ch = src.height;
      if (crop && (crop[2] || crop[3])) {
          if (crop[0] < 0 || crop[1] < 0 || crop[2] <= 0 || crop[3] <= 0 ||
-@@ -6933,16 +6940,18 @@ static int present_encode_m4(id<MTL4CommandBuffer> cb, id<MTLTexture> src, id<MT
+@@ -8045,16 +8052,18 @@ static int present_encode_m4(id<MTL4CommandBuffer> cb, id<MTLTexture> src, id<MT
      id<MTL4RenderCommandEncoder> en = [cb renderCommandEncoderWithDescriptor:rp];
      if (!en) { MLOG("[RED] failed to create the M4 present render encoder"); return 0; }
      [en barrierAfterQueueStages:MTLStageAll beforeStages:MTLStageAll visibilityOptions:MTL4VisibilityOptionDevice];
@@ -131,7 +131,7 @@ index 8fdbb42..f75888a 100644
      m4_end(en);
      return 1;
  }
-@@ -7016,11 +7025,29 @@ static int present_now(const tex_t *t, double period, uint64_t frame, uint64_t t
+@@ -8128,11 +8137,29 @@ static int present_now(const tex_t *t, double period, uint64_t frame, uint64_t t
      [g_q4 waitForDrawable:dr];
      id<MTL4CommandBuffer> cb = g_present_cb[alloc_i];
      [cb beginCommandBufferWithAllocator:g_present_alloc4[alloc_i]];

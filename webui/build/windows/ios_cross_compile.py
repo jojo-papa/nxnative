@@ -37,6 +37,7 @@ def source_list(repo):
     sources = [p for p in expand('SRC') + expand('GFX')
                if not p.stem.endswith('_mac')]
     sources += sorted((repo / 'dm/ios/Sources').glob('*.m'))
+    sources.append(repo / 'webui/build/windows/launcher_stub.m')   # Windows has no Swift compiler; front_ios.m's dm_show_launcher
     sources += sorted((repo / 'dm/third_party/libvpx').rglob('*.c'))
     if len(sources) != len(set(sources)):
         raise ValueError('Duplicate sources in expanded iOS source list')
