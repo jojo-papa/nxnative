@@ -3,10 +3,12 @@ from contextlib import asynccontextmanager
 import json
 import os
 from pathlib import Path
+import platform
 import re
 import secrets
 import shutil
 import threading
+import time
 import uuid
 
 from fastapi import FastAPI, HTTPException, Request
@@ -89,14 +91,22 @@ def create_app(root, token=None, config=None):
     @app.put('/api/config')
     async def configure(request: Request):
         value = await request.json()
-        if any(k not in ('tools', 'sdk', 'metal', 'python_index', 'sdk_search', 'sdk_archive', 'sdk_source') for k in value):
+        if any(k not in ('tools', 'sdk', 'sdk_version', 'metal', 'python_index', 'sdk_search', 'sdk_archive', 'sdk_source', 'output') for k in value):
             raise ValueError('Unknown tool setting')
+        from .apple_tools import SDK_RELEASES, SDK_SOURCES
+        if 'sdk_version' in value and (not isinstance(value['sdk_version'], str) or
+                                       value['sdk_version'] not in ('', *SDK_RELEASES)):
+            raise ValueError('Unsupported iPhoneOS SDK version')
+        if 'sdk' in value and not isinstance(value['sdk'], str):
+            raise ValueError('Expected a path')
+        manual_sdk = value.get('sdk', '')
         with jobs.lock:
             if jobs.active or jobs.pending:
                 raise ValueError('Wait for queued tasks before changing tools.')
             for key, path in value.items():
+                if key in ('sdk', 'sdk_version'):
+                    continue
                 if key == 'sdk_source':
-                    from .apple_tools import SDK_SOURCES
                     if path not in SDK_SOURCES: raise ValueError('Unsupported SDK source')
                     config[key] = path
                     if 'sdk_archive' not in value: config['sdk_archive'] = ''
@@ -107,6 +117,16 @@ def create_app(root, token=None, config=None):
                     continue
                 if not isinstance(path, str): raise ValueError('Expected a path')
                 config[key] = str(Path(path).expanduser().resolve()) if path else ''
+            if manual_sdk:
+                config['sdk'] = str(Path(manual_sdk).expanduser().resolve())
+                config['sdk_version'] = ''
+            else:
+                if 'sdk' in value:
+                    config['sdk'] = ''
+                if 'sdk_version' in value:
+                    config['sdk_version'] = value['sdk_version']
+                if config.get('sdk_source') == 'local':
+                    config['sdk_version'] = ''
             if not config.get('tools'): config['tools'] = str(root / 'tools')
             write_json(config_path, config)
         return environment(config)
@@ -129,6 +149,23 @@ def create_app(root, token=None, config=None):
         path = inbox / (identity + '.json')
         if not path.is_file(): raise ValueError('Upload not found')
         return path, json.loads(path.read_text())
+
+    @app.get('/api/uploads')
+    def list_uploads():
+        result = []
+        for meta in inbox.glob('*.json'):
+            if not re.fullmatch('[a-f0-9]{32}', meta.stem): continue
+            try:
+                value = json.loads(meta.read_text(encoding='utf-8'))
+                path = Path(value['path'])
+                size = value['size']
+                if not path.is_file() or path.stat().st_size != size: continue
+                result.append(dict(id=meta.stem, name=value['name'], size=size,
+                                   imported=bool(value.get('imported')),
+                                   uploaded=meta.stat().st_mtime if value.get('imported') else path.stat().st_mtime))
+            except (OSError, ValueError, KeyError, TypeError):
+                continue
+        return sorted(result, key=lambda item: item['uploaded'], reverse=True)
 
     @app.post('/api/uploads')
     async def upload_start(request: Request):
@@ -211,6 +248,8 @@ def create_app(root, token=None, config=None):
         targets = value.get('targets', ['ios'])
         if not isinstance(targets, list) or not targets or any(t not in ('ios', 'mac') for t in targets):
             raise ValueError('Invalid platform selection')
+        if 'mac' in targets and platform.system() != 'Darwin':
+            raise ValueError('macOS packaging requires a Mac.')
         separate_romfs = value.get('separate_romfs', False)
         if type(separate_romfs) is not bool:
             raise ValueError('Invalid RomFS packaging selection')
@@ -278,6 +317,31 @@ def create_app(root, token=None, config=None):
             if folder.resolve().parent != jobs.directory.resolve(): raise ValueError('Invalid task path')
             shutil.rmtree(folder)
         return {'ok': True}
+
+    @app.post('/api/cache/clear')
+    def clear_cache():
+        with jobs.lock:
+            if jobs.active or jobs.pending: raise ValueError('Wait for tasks before clearing caches')
+            removed = []
+            def wipe(path, label):
+                path = Path(path)
+                if not path.is_dir(): return
+                for attempt in range(5):
+                    try:
+                        shutil.rmtree(path)
+                        removed.append(label)
+                        return
+                    except OSError as error:
+                        if attempt == 4:
+                            raise ValueError(f'Could not clear {label}: {error}') from error
+                        time.sleep(0.2)
+            wipe(jobs.root / 'stage', 'stage')
+            wipe(Path(config.get('tools') or jobs.root / 'tools') / 'shader-cache', 'shader-cache')
+            for folder in jobs.directory.iterdir():
+                if not (folder / 'task.json').is_file(): continue
+                if folder.resolve().parent != jobs.directory.resolve(): continue
+                wipe(folder / 'inputs', 'task inputs')
+        return {'ok': True, 'removed': removed}
 
     app.mount('/', StaticFiles(directory=Path(__file__).with_name('static'), html=True), name='ui')
     return app

@@ -8,7 +8,7 @@ static inline const char *dm_launch_resolve(unsigned row, const char *saved, con
         {"0", "1", NULL}, {"0", "1", NULL}, {"0", "1", NULL}, {"0", "1", NULL},
         {"auto", "720", "900", "1080", "1440", NULL}, {"0", "1", NULL}, {"0", "1", NULL}
     };
-    static const char *const defaults[8] = {"system", "0", "1", "1", "0", "auto", "1", "0"};
+    static const char *const defaults[8] = {"system", "0", "1", "1", "0", "auto", "0", "0"};
     if (row >= 8) return NULL;
     const char *candidates[3] = {saved, env, bundle};
     for (unsigned source = 0; source < 3; source++) {

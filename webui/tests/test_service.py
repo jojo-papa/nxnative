@@ -60,6 +60,18 @@ class Service(unittest.TestCase):
         self.assertEqual(self.client.delete('/api/uploads/'+identity).status_code,200)
         self.assertTrue(path.exists())
 
+    def test_upload_history_lists_complete_uploads_without_paths(self):
+        complete=self.upload('base.nsp',b'123')
+        self.client.post('/api/uploads',json=dict(name='update.nsp',size=10))
+        response=self.client.get('/api/uploads')
+        self.assertEqual(response.status_code,200,response.text)
+        rows=response.json()
+        self.assertEqual([row['name'] for row in rows],['base.nsp'])
+        self.assertEqual(rows[0]['id'],complete)
+        self.assertEqual(rows[0]['size'],3)
+        self.assertNotIn('path',rows[0])
+        self.assertNotIn('keys',rows[0])
+
     def test_invalid_settings(self):
         game=self.upload();keys=self.upload('prod.keys',b'fixture')
         response=self.client.post('/api/tasks',json=dict(files=[game],keys=keys,settings={'DM_LANG':'invalid'}))
@@ -76,7 +88,8 @@ class Service(unittest.TestCase):
         for payload in (dict(base,kind='convert',separate_romfs=True),
                         dict(base,targets=['mac'],separate_romfs=True)):
             self.assertEqual(self.client.post('/api/tasks',json=payload).status_code,400)
-        response=self.client.post('/api/tasks',json=dict(base,targets=['ios','mac'],separate_romfs=True))
+        with patch('webui.server.platform.system',return_value='Darwin'):
+            response=self.client.post('/api/tasks',json=dict(base,targets=['ios','mac'],separate_romfs=True))
         self.assertEqual(response.status_code,200,response.text)
         identity=response.json()['id']
         task=json.loads((jobs.folder(identity)/'task.json').read_text())
@@ -87,10 +100,56 @@ class Service(unittest.TestCase):
         self.assertEqual(retry.status_code,200,retry.text)
         retried=json.loads((jobs.folder(retry.json()['id'])/'task.json').read_text())
         self.assertIs(retried['separate_romfs'],True)
-        default=self.client.post('/api/tasks',json=dict(base,targets=['mac'],separate_romfs=False))
+        with patch('webui.server.platform.system',return_value='Darwin'):
+            default=self.client.post('/api/tasks',json=dict(base,targets=['mac'],separate_romfs=False))
         self.assertEqual(default.status_code,200,default.text)
         default_task=json.loads((jobs.folder(default.json()['id'])/'task.json').read_text())
         self.assertIs(default_task['separate_romfs'],False)
+
+    def test_macos_target_requires_mac(self):
+        jobs=self.app.state.jobs;jobs.stop.set();jobs.thread.join()
+        game=self.upload();keys=self.upload('prod.keys',b'fixture')
+        base=dict(files=[game],keys=keys,kind='build',targets=['mac'])
+        with patch('webui.server.platform.system',return_value='Windows'):
+            response=self.client.post('/api/tasks',json=base)
+        self.assertEqual(response.status_code,400)
+        self.assertIn('macOS packaging requires a Mac',response.json()['detail'])
+        with patch('webui.server.platform.system',return_value='Darwin'):
+            response=self.client.post('/api/tasks',json=base)
+        self.assertEqual(response.status_code,200,response.text)
+        self.client.post(f"/api/tasks/{response.json()['id']}/cancel")
+
+    def test_output_folder_setting_persists(self):
+        output=str(self.root/'delivered')
+        response=self.client.put('/api/config',json={'output':output})
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertEqual(json.loads((self.root/'config.json').read_text())['output'],str(Path(output).resolve()))
+
+    def test_clear_cache_removes_intermediates_and_keeps_outputs(self):
+        jobs=self.app.state.jobs;jobs.stop.set();jobs.thread.join()
+        identity='a'*32;folder=jobs.directory/identity;folder.mkdir()
+        write_json(folder/'task.json',dict(id=identity,files=[],keys='',kind='build',targets=['ios']))
+        emit(folder,'status',status='succeeded')
+        (folder/'inputs/sub').mkdir(parents=True);(folder/'inputs/sub/cache.bin').write_bytes(b'cache')
+        (folder/'outputs').mkdir();(folder/'outputs/game.ipa').write_bytes(b'output')
+        (folder/'private.keys').write_bytes(b'keys')
+        (folder/'build.log').write_text('log')
+        stage=self.root/'stage'/'key'/'tree';stage.mkdir(parents=True);(stage/'file').write_text('x')
+        cache=self.root/'tools'/'shader-cache'/'cas';cache.mkdir(parents=True);(cache/'entry').write_text('x')
+        jobs.active='busy'
+        try:
+            self.assertEqual(self.client.post('/api/cache/clear').status_code,400)
+        finally:
+            jobs.active=None
+        response=self.client.post('/api/cache/clear')
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertFalse((self.root/'stage').exists())
+        self.assertFalse((self.root/'tools'/'shader-cache').exists())
+        self.assertFalse((folder/'inputs').exists())
+        self.assertTrue((folder/'outputs/game.ipa').is_file())
+        self.assertTrue((folder/'private.keys').is_file())
+        self.assertTrue((folder/'build.log').is_file())
+        self.assertTrue((folder/'task.json').is_file())
 
     def test_multiple_artifacts_are_downloadable(self):
         jobs=self.app.state.jobs;jobs.stop.set();jobs.thread.join()

@@ -54,6 +54,8 @@ def execute(folder):
         raise ValueError('Separate RomFS requires an iOS target')
     from .apple_tools import effective_config
     config = effective_config(config)
+    if platform.system() == 'Windows' and config.get('sdk_version') and not config.get('sdk'):
+        raise ValueError('The selected iPhoneOS SDK version is not installed. Install it in Settings and retry.')
     toolroot = Path(config['tools'])
     extractor = toolroot / 'nx_extract' / ('nx_extract.exe' if os.name == 'nt' else 'nx_extract')
     if not extractor.is_file():
@@ -66,6 +68,20 @@ def execute(folder):
     if os.name != 'nt':
         keys.chmod(0o600)
     outputs = folder / 'outputs'; outputs.mkdir(exist_ok=True)
+    output_dir = Path(config['output']).expanduser().resolve() if config.get('output') else None
+    def export(path):
+        path = Path(path)
+        if output_dir is None:
+            return
+        target = output_dir / path.name
+        if target.resolve() == path.resolve():
+            return
+        output_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, target)
+        sidecar = path.with_name(path.name + '.sha256')
+        if sidecar.is_file():
+            shutil.copy2(sidecar, output_dir / sidecar.name)
+        emit(folder, 'stage', name='Copied output: ' + target.name)
     converted, package_paths = [], []
     last_progress = [0.0]
     def progress(done, total):
@@ -86,6 +102,7 @@ def execute(folder):
     package_paths += converted
     for path in converted:
         emit(folder, 'artifact', name=str(path.relative_to(outputs)))
+        if task['kind'] == 'convert': export(path)
     if task['kind'] == 'convert':
         if not converted:
             raise ValueError('Select at least one XCI to convert.')
@@ -207,8 +224,10 @@ def execute(folder):
                 verify_archive(archive, g.get('romfs_marker'))
                 verify_no_romfs(output)
             publish(output)
+            export(output)
             if separate_target:
                 publish(archive)
+                export(archive)
             emit(folder, 'target', target=target, status='succeeded')
         except Exception as error:
             failed.append(target)

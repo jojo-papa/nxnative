@@ -56,7 +56,7 @@ static NSString *systemLanguage(void) {
     return [tag hasPrefix:@"ja"] ? @"ja" : @"en-US";
 }
 void dm_launch_settings_apply(void) {
-    for (NSNumber *row in @[@0, @1, @3, @5]) {
+    for (NSNumber *row in @[@0, @1, @3, @5, @6]) {
         NSUInteger i = row.unsignedIntegerValue;
         NSString *requested = choice(i), *effective = requested;
         NSString *reason = unavailable(i);
@@ -68,6 +68,7 @@ void dm_launch_settings_apply(void) {
                 requested.UTF8String, effective.UTF8String, reason ? " reason=" : "", reason.UTF8String ?: "");
     }
     setenv("DM_LAUNCHER", "0", 1);   // the fork's ObjC settings screen is the launcher; keep the upstream Swift launcher out of the way
+    if (getenv("DM_PERF_HUD") && atoi(getenv("DM_PERF_HUD"))) setenv("DM_SHOW_FPS", "0", 1);   // the HUD already shows FPS
     setenv("DM_DYNAMIC_RESOLUTION", "1", 1);
     setenv("DM_METALFX_INTERPOLATION", "0", 1);
     fprintf(stderr, "settings: game=%s iOS=%s\n", DM_GAME_ID, UIDevice.currentDevice.systemVersion.UTF8String);
@@ -85,14 +86,14 @@ void dm_launch_settings_apply(void) {
     self.navigationItem.leftBarButtonItem = [[UIBarButtonItem alloc] initWithTitle:@"Restore Defaults" style:UIBarButtonItemStylePlain target:self action:@selector(resetSettings)];
 }
 - (NSInteger)numberOfSectionsInTableView:(UITableView *)table { return 1; }
-- (NSInteger)tableView:(UITableView *)table numberOfRowsInSection:(NSInteger)section { return 4; }
+- (NSInteger)tableView:(UITableView *)table numberOfRowsInSection:(NSInteger)section { return 5; }
 - (NSString *)tableView:(UITableView *)table titleForFooterInSection:(NSInteger)section {
-    return @"Settings are saved per game and applied at launch. Restart the app to change them. Performance Overlay shows scene target sizes, effective upscaling, game output FPS and actual displayed FPS including generated frames. Unknown scene sizes show --. Debug Texture Bindings records every encoded game draw's bindings to draw-textures.tsv and draw-textures.prev.tsv (about 64 MiB combined, rolling). Debug logging reduces performance; leave it off for FPS comparisons. Frame Generation is experimental; iPhone display and stability are not yet verified. Local image distortion may occur. Upscale Target Resolution controls MetalFX output only. Auto follows the screen. A target at or below the input size skips upscaling. Game language also depends on supported languages and save settings.";
+    return @"Settings are saved per game and applied at launch. Restart the app to change them. Performance HUD shows FPS, input/output resolution and memory use. Unknown scene sizes show --. Debug Texture Bindings records every encoded game draw's bindings to draw-textures.tsv and draw-textures.prev.tsv (about 64 MiB combined, rolling). Debug logging reduces performance; leave it off for FPS comparisons. Frame Generation is experimental; iPhone display and stability are not yet verified. Local image distortion may occur. Upscale Target Resolution controls MetalFX output only. Auto follows the screen. A target at or below the input size skips upscaling. Game language also depends on supported languages and save settings.";
 }
 - (UITableViewCell *)tableView:(UITableView *)table cellForRowAtIndexPath:(NSIndexPath *)path {
     UITableViewCell *cell = [[UITableViewCell alloc] initWithStyle:UITableViewCellStyleSubtitle reuseIdentifier:nil];
-    NSUInteger i = ((NSUInteger[]){0, 1, 3, 5})[path.row];
-    cell.textLabel.text = @[@"Game Language", @"Operation Mode", @"Dynamic Resolution", @"MetalFX Spatial Upscaling", @"MetalFX Frame Generation (Experimental)", @"Upscale Target Resolution", @"Performance Overlay", @"Debug Texture Bindings"][i];
+    NSUInteger i = ((NSUInteger[]){0, 1, 3, 5, 6})[path.row];
+    cell.textLabel.text = @[@"Game Language", @"Operation Mode", @"Dynamic Resolution", @"MetalFX Spatial Upscaling", @"MetalFX Frame Generation (Experimental)", @"Upscale Target Resolution", @"Performance HUD", @"Debug Texture Bindings"][i];
     NSArray *names = @[@[@"System", @"Simplified Chinese", @"Traditional Chinese", @"English", @"Japanese"],
                        @[@"Handheld", @"Docked"], @[@"Off", @"On"], @[@"Off", @"On"], @[@"Off", @"On"],
                        @[@"Auto (Screen)", @"720p", @"900p", @"1080p", @"1440p"], @[@"Off", @"On"], @[@"Off", @"On"]];
@@ -116,7 +117,7 @@ void dm_launch_settings_apply(void) {
 }
 - (void)tableView:(UITableView *)table didSelectRowAtIndexPath:(NSIndexPath *)path {
     [table deselectRowAtIndexPath:path animated:YES];
-    NSUInteger i = ((NSUInteger[]){0, 1, 3, 5})[path.row]; if (unavailable(i)) return;
+    NSUInteger i = ((NSUInteger[]){0, 1, 3, 5, 6})[path.row]; if (unavailable(i)) return;
     if(i==3 || i==4 || i==6 || i==7)return;
     NSArray *names = @[@[@"System", @"Simplified Chinese", @"Traditional Chinese", @"English", @"Japanese"],
                        @[@"Handheld", @"Docked"], @[@"Off", @"On"], @[@"Off", @"On"], @[@"Off", @"On"],

@@ -17,6 +17,10 @@ SDK_MINIMUM = (26, 5)
 SKIP = {'.git', '.webui-data', 'node_modules', 'venv', 'runtime', '__pycache__'}
 
 
+def sdk_version_key(version):
+    return tuple(int(n) for n in re.findall(r'\d+', version))
+
+
 def sdk_info(path):
     path = Path(path)
     if path.suffix.lower() != '.sdk' or not path.is_dir():
@@ -117,7 +121,7 @@ def scan_apple_tools(config):
                 sdks.append(info)
             elif 'iphoneos' in path.name.lower() and path.is_file() and path.name.lower().endswith(('.zip', '.tar', '.tar.gz', '.tar.xz', '.tgz')):
                 archives.append(str(path.resolve()))
-    sdks.sort(key=lambda item: (item['version'] == '26.5', tuple(int(n) for n in re.findall(r'\d+', item['version']))), reverse=True)
+    sdks.sort(key=lambda item: (item['version'] == '26.5', sdk_version_key(item['version'])), reverse=True)
     metal = ''
     candidates = [Path(config['tools']) / 'metal/metal.exe']
     on_path = shutil.which('metal.exe')
@@ -130,8 +134,10 @@ def scan_apple_tools(config):
         if candidate.is_file() and candidate.with_name('metallib.exe').is_file():
             metal = str(candidate.resolve())
             break
+    releases = sorted(SDK_RELEASES.values(), key=lambda item: sdk_version_key(item['version']), reverse=True)
     return dict(sdks=sdks, archives=sorted(set(archives)), metal=metal,
-                searched=[str(path) for path in locations], minimum='26.5')
+                releases=[{key: item[key] for key in ('version', 'release', 'url', 'sha256')} for item in releases],
+                default_version=DEFAULT_SDK_VERSION, searched=[str(path) for path in locations], minimum='26.5')
 
 
 def effective_config(config, discovery=None):
@@ -139,11 +145,19 @@ def effective_config(config, discovery=None):
     if platform.system() != 'Windows':
         return result
     discovery = discovery if discovery is not None else scan_apple_tools(config)
-    selected = sdk_info(config.get('sdk') or Path(config['tools']) / 'ios-cross/iPhoneOS26.5.sdk')
-    if selected:
-        result['sdk'] = selected['path']
-    elif discovery['sdks']:
-        result['sdk'] = discovery['sdks'][0]['path']
+    version = config.get('sdk_version') or ''
+    if version:
+        selected = sdk_info(Path(config['tools']) / 'ios-cross' / f'iPhoneOS{version}.sdk')
+        if selected:
+            result['sdk'] = selected['path']
+        else:
+            result.pop('sdk', None)
+    else:
+        selected = sdk_info(config.get('sdk') or Path(config['tools']) / 'ios-cross/iPhoneOS26.5.sdk')
+        if selected:
+            result['sdk'] = selected['path']
+        elif discovery['sdks']:
+            result['sdk'] = discovery['sdks'][0]['path']
     configured_metal = Path(config.get('metal') or Path(config['tools']) / 'metal/metal.exe')
     if configured_metal.is_file():
         result['metal'] = str(configured_metal.resolve())
@@ -164,14 +178,33 @@ def sdk_archive(config, discovery=None):
 
 
 
-SDK_REPOSITORY = {
-    'repository': 'https://github.com/xybp888/iOS-SDKs',
-    'release': 'iOS26.5-SDKs',
-    'version': '26.5',
-    'url': 'https://github.com/xybp888/iOS-SDKs/releases/download/iOS26.5-SDKs/iPhoneOS26.5.sdk.zip',
-    'sha256': 'bed0f155d84e98ad8273b3bd57a0816ae5e772e1aa8539e6d79476221ce33173',
+SDK_RELEASES = {
+    '26.5': {
+        'repository': 'https://github.com/xybp888/iOS-SDKs',
+        'release': 'iOS26.5-SDKs',
+        'version': '26.5',
+        'url': 'https://github.com/xybp888/iOS-SDKs/releases/download/iOS26.5-SDKs/iPhoneOS26.5.sdk.zip',
+        'sha256': 'bed0f155d84e98ad8273b3bd57a0816ae5e772e1aa8539e6d79476221ce33173',
+    },
+    '27.0': {
+        'repository': 'https://github.com/xybp888/iOS-SDKs',
+        'release': 'iOS27.0-SDKs',
+        'version': '27.0',
+        'url': 'https://github.com/xybp888/iOS-SDKs/releases/download/iOS27.0-SDKs/iPhoneOS27.0.sdk.zip',
+        'sha256': '97d107a51562b2236c064a0dea98777faddcf65a1259d4f7abccd46695ef3c15',
+    },
 }
+DEFAULT_SDK_VERSION = '26.5'
+SDK_REPOSITORY = SDK_RELEASES[DEFAULT_SDK_VERSION]
 SDK_SOURCES = ('xybp888', 'local')
+
+
+def sdk_release(version=None):
+    version = version or DEFAULT_SDK_VERSION
+    try:
+        return SDK_RELEASES[version]
+    except KeyError:
+        raise ValueError('Unsupported iPhoneOS SDK version') from None
 
 
 def sdk_install_method(config, discovery=None):
@@ -253,13 +286,14 @@ def unpack_sdk(archive, destination):
 def install_sdk(folder, config):
     from .dependencies import download
     from .jobs import emit
+    release = sdk_release(config.get('sdk_version'))
     method = sdk_install_method(config)
     downloaded = method == 'repository'
     if downloaded:
-        archive = folder / 'iPhoneOS26.5.sdk.zip'
-        emit(folder, 'stage', name='Downloading iPhoneOS 26.5 SDK from xybp888/iOS-SDKs')
-        print('Third-party SDK source: ' + SDK_REPOSITORY['url'], flush=True)
-        download(SDK_REPOSITORY['url'], archive, folder, SDK_REPOSITORY['sha256'], algorithm='sha256', label='iPhoneOS SDK')
+        archive = folder / ('iPhoneOS' + release['version'] + '.sdk.zip')
+        emit(folder, 'stage', name='Downloading iPhoneOS ' + release['version'] + ' SDK from xybp888/iOS-SDKs')
+        print('Third-party SDK source: ' + release['url'], flush=True)
+        download(release['url'], archive, folder, release['sha256'], algorithm='sha256', label='iPhoneOS SDK')
     else:
         archive = sdk_archive(config)
     if not archive:
@@ -274,11 +308,11 @@ def install_sdk(folder, config):
         candidates = [info for path in bounded_entries(stage, depth=5, budget=5000) if (info := sdk_info(path))]
         if len(candidates) != 1:
             raise ValueError('Archive must contain exactly one complete iPhoneOS SDK version 26.5 or newer; simulator and macOS SDKs are not accepted.')
-        if downloaded and candidates[0]['version'] != SDK_REPOSITORY['version']:
-            raise ValueError('Downloaded SDK version does not match the pinned release')
+        if downloaded and candidates[0]['version'] != release['version']:
+            raise ValueError('Downloaded SDK version does not match the selected release')
         source = Path(candidates[0]['path'])
         if downloaded:
-            (source / 'nxnative-sdk-source.json').write_text(json.dumps(SDK_REPOSITORY, indent=2) + '\n', encoding='utf-8')
+            (source / 'nxnative-sdk-source.json').write_text(json.dumps(release, indent=2) + '\n', encoding='utf-8')
         destination = root / 'ios-cross' / ('iPhoneOS' + candidates[0]['version'] + '.sdk')
         destination.parent.mkdir(parents=True, exist_ok=True)
         if destination.exists():

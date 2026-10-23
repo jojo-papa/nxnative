@@ -30,7 +30,7 @@ directory is local-only and is added to `.git/info/exclude`; the upstream
 ## Builds use a stage
 
 A build never writes into the upstream working tree. `webui/staging.py` copies
-the repository into `.webui-data/stage/<key>/tree`, applies the six overlays and
+the repository into `.webui-data/stage/<key>/tree`, applies the seven overlays and
 the nine patches under `webui/patches/`, and runs the build from that copy. The
 stage is reused until a source file or patch changes.
 

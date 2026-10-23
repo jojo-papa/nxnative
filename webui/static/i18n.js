@@ -164,7 +164,33 @@ Object.assign(zhMessages, {
   "RomFS archive": "RomFS 压缩包",
   "Invalid RomFS packaging selection": "无效的 RomFS 打包选项",
   "Separate RomFS is only available for application builds": "只有应用打包任务可以分离 RomFS",
-  "Separate RomFS requires an iOS target": "分离 RomFS 需要选择 iOS 目标"
+  "Separate RomFS requires an iOS target": "分离 RomFS 需要选择 iOS 目标",
+  "macOS packaging requires a Mac.": "打包 macOS 应用需要 Mac。"
+});
+Object.assign(zhMessages, {
+  "iPhoneOS SDK version": "iPhoneOS SDK 版本",
+  "Download selected iPhoneOS SDK": "下载所选 iPhoneOS SDK",
+  "Select a version to download with SHA-256 verification. Automatic uses an installed SDK.": "选择版本后按 SHA-256 校验下载；自动模式使用已安装的 SDK。",
+  "Automatic (installed SDK)": "自动（使用已安装 SDK）",
+  "Unsupported iPhoneOS SDK version": "不支持的 iPhoneOS SDK 版本",
+  "xybp888/iOS-SDKs (third-party, SHA-256 verified)": "xybp888/iOS-SDKs（第三方，SHA-256 校验）",
+  "Clear build cache": "清空构建缓存",
+  "Deletes staging trees, shared shader caches and per-task intermediate files. Finished outputs, logs and uploads stay. Wait for running tasks to finish.": "删除暂存目录、共享着色器缓存和各任务的中间文件；已完成的输出、日志和上传文件会保留。请等待运行中的任务结束后再操作。",
+  "Delete staging trees, shader caches and per-task intermediate files? Finished outputs and logs are kept.": "删除暂存目录、着色器缓存和各任务中间文件？已完成的输出和日志会保留。",
+  "Build cache cleared.": "构建缓存已清空。",
+  "Uploading": "正在上传",
+  "Uploaded": "已上传",
+  "Upload failed": "上传失败",
+  "Previously uploaded files": "以前上传的文件",
+  "Add": "添加",
+  "Added": "已添加",
+  "imported": "本地导入",
+  "Delete this stored upload? Existing task caches may keep a copy, but a retry may need it.": "删除这个已保存的上传文件？已有任务缓存可能仍保留副本，但之后的重试可能需要它。",
+  "Output folder": "输出文件夹",
+  "Optional; finished files are copied here": "可选；完成的文件会复制到这里",
+  "Finished builds and converted NSPs are also copied here. Leave empty to keep them only in the task data folder.": "完成的构建产物和转换后的 NSP 也会复制到这里；留空则只保留在任务数据目录中。",
+  "Wait for tasks before clearing caches": "请等待任务结束后再清空缓存",
+  "Choose an iPhoneOS SDK version (26.5 or newer); missing SDKs download from xybp888/iOS-SDKs (third-party) with SHA-256 verification. Windows links are materialized automatically. Existing valid SDKs are reused; local archives remain supported.": "选择 iPhoneOS SDK 版本（26.5 或更新）；缺少的 SDK 将从第三方仓库 xybp888/iOS-SDKs 下载并校验 SHA-256，自动处理 Windows 符号链接兼容性。已有可用 SDK 会直接复用，也支持本地压缩包。"
 });
 let uiLanguage = localStorage.getItem('nx-ui-language') || (navigator.language.startsWith('zh') ? 'zh-CN' : 'en');
 if (!['zh-CN', 'en'].includes(uiLanguage)) uiLanguage = 'en';

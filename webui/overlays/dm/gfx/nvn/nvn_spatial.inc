@@ -3,6 +3,15 @@
 #import <MetalFX/MetalFX.h>
 #import <MetalFX/MTL4FXSpatialScaler.h>
 
+// Last present sizes and whether MetalFX was used, read by the in-app performance HUD.
+static _Atomic unsigned g_hud_in_w, g_hud_in_h, g_hud_out_w, g_hud_out_h;
+static _Atomic int g_hud_active;
+void dm_gfx_hud_sizes(unsigned *iw, unsigned *ih, unsigned *ow, unsigned *oh, int *active) {
+    *iw = atomic_load(&g_hud_in_w); *ih = atomic_load(&g_hud_in_h);
+    *ow = atomic_load(&g_hud_out_w); *oh = atomic_load(&g_hud_out_h);
+    *active = atomic_load(&g_hud_active);
+}
+
 @interface NvSpatial : NSObject {
 @public
     id<MTL4FXSpatialScaler> scaler;
@@ -21,6 +30,7 @@ static _Atomic int g_memory_pressure;
 void dm_gfx_spatial_trim(void) {
     @synchronized (NvSpatial.class) {
         for (int i = 0; i < 3; i++) g_spatial[i] = nil;
+        atomic_store(&g_hud_active, 0);
     }
 }
 void dm_gfx_memory_pressure(void) {
@@ -41,6 +51,9 @@ static int optional_memory_ok(void) {
 }
 static NvSpatial *spatial_prepare(int slot, NSUInteger w, NSUInteger h, NSUInteger ow, NSUInteger oh) {
   @synchronized (NvSpatial.class) {
+    atomic_store(&g_hud_in_w, (unsigned)w); atomic_store(&g_hud_in_h, (unsigned)h);
+    atomic_store(&g_hud_out_w, (unsigned)ow); atomic_store(&g_hud_out_h, (unsigned)oh);
+    atomic_store(&g_hud_active, 0);
     static int enabled = -1;
     if (enabled < 0) { const char *e = getenv("DM_METALFX_SPATIAL"); enabled = e && !strcmp(e, "1"); }
     if (!enabled) return nil;
@@ -48,7 +61,9 @@ static NvSpatial *spatial_prepare(int slot, NSUInteger w, NSUInteger h, NSUInteg
     if (!w || !h || ow <= w || oh <= h || fabs((double)w / h - (double)ow / oh) > 0.02) return nil;
     NvSpatial *p = g_spatial[slot];
     if (p && atomic_load(&p->busy)) return nil;
-    if (p && p->input.width == w && p->input.height == h && p->output.width == ow && p->output.height == oh) return p;
+    if (p && p->input.width == w && p->input.height == h && p->output.width == ow && p->output.height == oh) {
+        atomic_store(&g_hud_active, 1); return p;
+    }
     if (![MTLFXSpatialScalerDescriptor supportsMetal4FX:g_dev]) {
         MLOG("MetalFX spatial: unsupported; using ordinary scaling"); enabled = 0; return nil;
     }
@@ -77,6 +92,7 @@ static NvSpatial *spatial_prepare(int slot, NSUInteger w, NSUInteger h, NSUInteg
     p->scaler.colorTexture = p->input; p->scaler.outputTexture = p->output;
     p->scaler.inputContentWidth = w; p->scaler.inputContentHeight = h; p->scaler.fence = p->fence;
     g_spatial[slot] = p;
+    atomic_store(&g_hud_active, 1);
     MLOG("MetalFX spatial: %lux%lu -> %lux%lu (slot %d)", (unsigned long)w, (unsigned long)h, (unsigned long)ow, (unsigned long)oh, slot);
     return p;
   }

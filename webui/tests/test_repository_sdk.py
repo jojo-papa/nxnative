@@ -8,6 +8,7 @@ import zipfile
 
 from fastapi.testclient import TestClient
 from webui import apple_tools as apple, dependencies as deps
+from webui.capabilities import environment
 from webui.server import create_app
 
 
@@ -79,6 +80,35 @@ class RepositorySDK(unittest.TestCase):
             self.assertEqual(json.loads((sdk/'nxnative-sdk-source.json').read_text()),apple.SDK_REPOSITORY)
             self.assertFalse((task/'iPhoneOS26.5.sdk.zip').exists())
 
+    def test_selected_sdk_version_downloads_that_release(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);task=root/'task';task.mkdir();config={'tools':str(root/'tools'),'sdk_version':'27.0'}
+            release=apple.SDK_RELEASES['27.0']
+            def download(url,destination,folder,digest,**kwargs):
+                self.assertEqual(url,release['url'])
+                self.assertEqual(digest,release['sha256'])
+                self.assertEqual(kwargs['algorithm'],'sha256')
+                sdk_zip(destination,version='27.0')
+            with patch.object(deps,'download',side_effect=download):
+                apple.install_sdk(task,config)
+            sdk=root/'tools/ios-cross/iPhoneOS27.0.sdk'
+            self.assertIsNotNone(apple.sdk_info(sdk))
+            self.assertEqual(json.loads((sdk/'nxnative-sdk-source.json').read_text()),release)
+            self.assertFalse((task/'iPhoneOS27.0.sdk.zip').exists())
+
+    def test_selected_version_requires_that_exact_sdk(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);tools=root/'tools';archive=root/'sdk.zip'
+            sdk_zip(archive)
+            apple.unpack_sdk(archive,tools/'ios-cross')
+            discovery=dict(sdks=[],archives=[],metal='',releases=[],default_version='26.5',searched=[],minimum='26.5')
+            with patch.object(apple.platform,'system',return_value='Windows'),patch.object(apple,'scan_apple_tools',return_value=discovery):
+                resolved=apple.effective_config({'tools':str(tools),'sdk_version':'27.0'},discovery)
+                checks={c['name']:c for c in environment({'tools':str(tools),'sdk_version':'27.0'})['checks']}
+            self.assertNotIn('sdk',resolved)
+            self.assertFalse(checks['sdk']['available'])
+            self.assertTrue(checks['sdk']['path'].endswith('iPhoneOS27.0.sdk'))
+
     def test_checksum_failure_cannot_publish_sdk(self):
         with tempfile.TemporaryDirectory() as directory:
             root=Path(directory);task=root/'task';task.mkdir()
@@ -107,4 +137,22 @@ class RepositorySDK(unittest.TestCase):
                     self.assertEqual(json.loads((Path(directory)/'config.json').read_text())['sdk_source'],'local')
                     self.assertEqual(client.put('/api/config',json={'sdk_source':'https://example.com/sdk.zip'}).status_code,400)
                     self.assertEqual(client.put('/api/config',json={'sdk_source':'xybp888'}).status_code,200)
+            finally:app.state.jobs.close()
+
+    def test_sdk_version_validation_and_manual_path_precedence(self):
+        with tempfile.TemporaryDirectory() as directory:
+            app=create_app(Path(directory),'token')
+            try:
+                with TestClient(app) as client:
+                    client.headers['X-Session-Token']='token'
+                    self.assertEqual(client.put('/api/config',json={'sdk_version':'99.0'}).status_code,400)
+                    self.assertEqual(client.put('/api/config',json={'sdk_version':'27.0','sdk':''}).status_code,200)
+                    config=json.loads((Path(directory)/'config.json').read_text())
+                    self.assertEqual(config['sdk_version'],'27.0')
+                    self.assertFalse(config.get('sdk'))
+                    custom=Path(directory)/'custom.sdk'
+                    self.assertEqual(client.put('/api/config',json={'sdk_version':'27.0','sdk':str(custom)}).status_code,200)
+                    config=json.loads((Path(directory)/'config.json').read_text())
+                    self.assertEqual(config['sdk_version'],'')
+                    self.assertTrue(config['sdk'].endswith('custom.sdk'))
             finally:app.state.jobs.close()

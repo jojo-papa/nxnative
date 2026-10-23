@@ -21,7 +21,7 @@ DEPENDENCY_HELP.update({'clang': ('https://github.com/mstorsjo/llvm-mingw/releas
 
 DEPENDENCY_HELP['mac_metal'] = ('https://developer.apple.com/documentation/Xcode/downloading-and-installing-additional-xcode-components', 'With Xcode installed and selected, downloads and installs its Metal Toolchain through the official xcodebuild command. Finish Xcode first-launch setup before installing.')
 
-DEPENDENCY_HELP['sdk'] = ('https://github.com/xybp888/iOS-SDKs/releases/tag/iOS26.5-SDKs', 'Missing SDKs download from xybp888/iOS-SDKs (third-party), pinned to iPhoneOS 26.5 with SHA-256 verification. Windows links are materialized automatically. Existing valid SDKs are reused; local archives remain supported.')
+DEPENDENCY_HELP['sdk'] = ('https://github.com/xybp888/iOS-SDKs/releases', 'Choose an iPhoneOS SDK version (26.5 or newer); missing SDKs download from xybp888/iOS-SDKs (third-party) with SHA-256 verification. Windows links are materialized automatically. Existing valid SDKs are reused; local archives remain supported.')
 
 def profiles(system=None):
     system = system or platform.system()
@@ -58,9 +58,11 @@ def environment(config):
     expected = {'extractor': root / 'nx_extract' / ('nx_extract' + exe),
                 'dotnet': root / 'dotnet' / ('dotnet' + exe)}
     if system == 'Windows':
+        version = config.get('sdk_version')
+        sdk_default = root / 'ios-cross' / ('iPhoneOS' + version + '.sdk' if version else 'iPhoneOS26.5.sdk')
         expected.update(clang=root / 'ios-cross/toolchain/windows/iphone/bin/clang.exe',
                         lld=root / 'ios-cross/toolchain/windows/iphone/bin/lld.exe',
-                        sdk=Path(resolved.get('sdk') or root / 'ios-cross/iPhoneOS26.5.sdk'),
+                        sdk=Path(resolved.get('sdk') or sdk_default),
                         metal=Path(resolved.get('metal') or root / 'metal/metal.exe'),
                         spirv_cross=root / 'spirv-cross-build/spirv-cross.exe')
     checks = [dict(name=k, path=str(v), available=v.is_dir() if k == 'sdk' else v.is_file()) for k, v in expected.items()]
