@@ -47,12 +47,92 @@ def emit(directory, kind, **data):
         stream.flush()
 
 
+BUILD_STAGE_PROGRESS = (
+    ('preparing staged sources', 0.02),
+    ('building ', 0.03),
+    ('converting xci', 0.04),
+    ('build nx_extract', 0.05),
+    ('survey', 0.05),
+    ('prepare xcode', 0.70),
+    ('verify', 0.36),
+    ('rewrite', 0.30),
+    ('dlc', 0.22),
+    ('extract', 0.15),
+    ('glslc', 0.32),
+    ('decode', 0.34),
+    ('capture', 0.34),
+    ('heap check', 0.35),
+    ('shader split', 0.45),
+    ('shader_split', 0.45),
+    ('windows_shaders', 0.62),
+    ('shaders', 0.62),
+    ('app build', 0.80),
+    ('host_compile', 0.82),
+    ('embed_', 0.87),
+    ('host_link', 0.92),
+    ('ipa pack', 0.95),
+    ('ipa_pack', 0.95),
+    ('romfs_archive', 0.98),
+    ('copied output', 0.99),
+)
+
+
+def stage_progress(name):
+    text = str(name).lower()
+    for needle, fraction in BUILD_STAGE_PROGRESS:
+        if needle in text:
+            return fraction
+    return None
+
+
+def task_progress(task, status, events):
+    kind = task.get('kind')
+    if kind == 'convert':
+        if status == 'succeeded':
+            return 100
+        last = None
+        for event in events:
+            if event.get('kind') == 'progress' and event.get('total'):
+                last = event
+        if last:
+            return max(0, min(99, int(100 * last['done'] / last['total'])))
+        return 0
+    if kind != 'build':
+        return None
+    targets = task.get('targets') or []
+    if not targets:
+        return None
+    if status == 'succeeded':
+        return 100
+    done, fraction, target_fraction = 0, 0.0, 0.0
+    failed_target_fraction = None
+    for event in events:
+        if event.get('kind') == 'target':
+            if len(targets) == 1 and event.get('status') == 'failed':
+                failed_target_fraction = target_fraction
+            done += 1
+            fraction = 0.0
+            target_fraction = 0.0
+        elif event.get('kind') == 'stage':
+            value = stage_progress(event.get('name', ''))
+            if value is not None:
+                fraction = max(fraction, value)
+                target_fraction = max(target_fraction, value)
+    progress = int(100 * (done + fraction) / len(targets))
+    if failed_target_fraction is not None:
+        progress = int(100 * failed_target_fraction)
+    elif status in ('failed', 'cancelled', 'interrupted'):
+        progress = min(progress, 99)
+    return max(0, min(100, progress))
+
+
 def summary(directory):
     result = json.loads((directory / 'task.json').read_text(encoding='utf-8'))
     result.update(status='queued', artifacts=[], stage='Waiting')
-    cursor = 0
+    cursor, events = 0, []
     while True:
         rows, end = read_events(directory / 'events.jsonl', cursor)
+        events.extend(rows)
         for event in rows:
             if event['kind'] == 'status':
                 result['status'] = event['status']
@@ -62,6 +142,7 @@ def summary(directory):
             if event['kind'] == 'artifact':
                 result['artifacts'].append(event['name'])
         if end == cursor:
+            result['progress'] = task_progress(result, result['status'], events)
             return result
         cursor = end
 

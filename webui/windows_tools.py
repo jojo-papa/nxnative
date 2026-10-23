@@ -5,6 +5,7 @@ from pathlib import Path
 import platform
 import shutil
 import struct
+import time
 
 from .apple_tools import remove_stage
 from .jobs import emit
@@ -29,6 +30,25 @@ def check_apple_compiler(folder, compiler, run):
                  'ios', '26.0', '26.5', '-dylib', '-no_adhoc_codesign', '-o', library, obj])
     if library.read_bytes()[:8] != struct.pack('<II', 0xfeedfacf, 0x100000c):
         raise RuntimeError('Darwin linker did not generate an ARM64 Mach-O library')
+
+
+def replace_with_retry(source, destination, attempts=40, delay=0.25):
+    """Move a freshly built executable into place, retrying Windows sharing violations.
+
+    Defender and other scanners briefly hold a just-executed executable open, so
+    os.replace can fail with WinError 32 even though the build process exited.
+    """
+    for attempt in range(attempts):
+        try:
+            os.replace(source, destination)
+            return
+        except PermissionError as error:
+            if attempt + 1 == attempts:
+                raise RuntimeError(
+                    'Could not move the built SPIRV-Cross executable into place because '
+                    'another program is using it. Close other nxnative builds or scanners '
+                    'watching the tools folder, then retry the installation.') from error
+            time.sleep(delay)
 
 
 def install_llvm(folder, root, run, for_spirv=False):
@@ -105,7 +125,7 @@ def install_spirv_cross(folder, root, run):
             raise RuntimeError('SPIRV-Cross build produced no executable')
         destination = root / 'spirv-cross-build'
         destination.mkdir(parents=True, exist_ok=True)
-        os.replace(output, destination / 'spirv-cross.exe')
+        replace_with_retry(output, destination / 'spirv-cross.exe')
         licenses = root / 'licenses/spirv-cross'
         licenses.mkdir(parents=True, exist_ok=True)
         for license in source.glob('LICENSE*'):

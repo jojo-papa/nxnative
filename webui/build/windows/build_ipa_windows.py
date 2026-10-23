@@ -88,17 +88,43 @@ def main():
     env['PATH'] = str(tools / 'dotnet') + os.pathsep + env.get('PATH', '')
     python = sys.executable
     started = time.monotonic()
-    def run(label, command, output=None):
+    def count_files(root, suffix):
+        total = 0
+        if not Path(root).is_dir(): return 0
+        for _, _, names in os.walk(root):
+            total += sum(1 for name in names if name.endswith(suffix))
+        return total
+    def run(label, command, output=None, progress=None):
         if os.environ.get('NX_PROGRESS'):
             print('@NXEVENT ' + json.dumps({'name': label}), flush=True)
         print(f'[{time.strftime("%H:%M:%S")}] {label}', flush=True)
         log = logs / (label + '.log')
+        step_started = time.monotonic()
         with log.open('w', encoding='utf-8') as stream:
-            result = subprocess.run([str(x) for x in command], env=env, cwd=repo,
-                                    stdout=stream, stderr=subprocess.STDOUT)
-        if result.returncode:
+            process = subprocess.Popen([str(x) for x in command], env=env, cwd=repo,
+                                       stdout=stream, stderr=subprocess.STDOUT)
+            last = step_started
+            while process.poll() is None:
+                time.sleep(0.5)
+                now = time.monotonic()
+                if now - last < 10: continue
+                last = now
+                line = None
+                if progress:
+                    try: line = progress()
+                    except Exception: line = None
+                if not line:
+                    elapsed = int(now - step_started)
+                    line = f'{label} running {elapsed // 60}:{elapsed % 60:02d}'
+                print(f'[{time.strftime("%H:%M:%S")}] {line}', flush=True)
+                if os.environ.get('NX_PROGRESS'):
+                    print('@NXEVENT ' + json.dumps({'name': line}), flush=True)
+            code = process.wait()
+        elapsed = time.monotonic() - step_started
+        if code:
             print('\n'.join(log.read_text(encoding='utf-8', errors='replace').splitlines()[-40:]), flush=True)
-            raise RuntimeError(f'{label} failed ({result.returncode}); see {log}')
+            raise RuntimeError(f'{label} failed ({code}) after {elapsed:.1f}s; see {log}')
+        print(f'[{time.strftime("%H:%M:%S")}] {label} finished in {elapsed:.1f}s', flush=True)
         if output:
             shutil.copyfile(log, output)
 
@@ -163,17 +189,36 @@ def main():
         files={p.relative_to(shader).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest() for p in files}), indent=2), encoding='utf-8')
     print('All shader evidence tables match the existing profile exactly', flush=True)
     windows = build / 'windows_shaders'
+    shader_rows = [line.split('\t') for line in (tables / 'shader_map.tsv').read_text(encoding='utf-8').splitlines()
+                   if line and not line.startswith('#')]
+    shader_total = len({row[3] for row in shader_rows if len(row) > 3})
+    def shader_progress():
+        done = min(count_files(windows / 'ios', '_b.json'), shader_total)
+        return (f'windows_shaders {done}/{shader_total} shaders ({100 * done / shader_total:.1f}%)'
+                if shader_total else None)
     run('windows_shaders', [python, repo / 'webui/build/windows/windows_shader_build.py', '--profile', profile,
                             '--packages', shader / 'packages', '--out', windows, '--metal', a.metal.resolve(),
                             '--spirv-cross', tools / 'spirv-cross-build/spirv-cross.exe',
-                            '--dotnet', tools / 'dotnet/dotnet.exe', '--cache-dir', tools / 'shader-cache', '--jobs', a.jobs])
+                            '--dotnet', tools / 'dotnet/dotnet.exe', '--cache-dir', tools / 'shader-cache', '--jobs', a.jobs],
+        progress=shader_progress)
     chain = re.search(r'#define DMSH_CHAIN "([a-f0-9]+)"', g.table('dmsh_chain.h').read_text())[1]
     run('c1_guard', [python, repo / 'dm/gfx/tools/c1_guard.py', windows / ('mac/b-' + chain), g.table('c1_full.tsv')])
     host = build / 'windows_host'
     clang = tools / 'ios-cross/toolchain/windows/iphone/bin/clang.exe'
     sdk = a.sdk.resolve() if a.sdk else tools / 'ios-cross/iPhoneOS26.5.sdk'
+    sys.path.insert(0, str(Path(__file__).parent))
+    try:
+        import ios_cross_compile
+        host_total = len(ios_cross_compile.source_list(repo))
+    except Exception:
+        host_total = 0
+    host_started = time.time()
+    def host_progress():
+        if not host_total: return None
+        done = sum(1 for p in (host / 'objects').glob('*.o') if p.stat().st_mtime >= host_started - 5)
+        return f'host_compile {done}/{host_total} sources'
     run('host_compile', [python, repo / 'webui/build/windows/ios_cross_compile.py', '--clang', clang, '--sdk', sdk,
-                         '--profile', profile, '--out', host, '--jobs', min(a.jobs, 8)])
+                         '--profile', profile, '--out', host, '--jobs', min(a.jobs, 8)], progress=host_progress)
     run('embed_generate', [python, repo / 'dm/ios/tools/gen_embed.py', patched, host / 'embed.S', *g.words('modules')], host / 'embed_link_flags.txt')
     run('embed_assemble', [clang, '-target', 'arm64-apple-ios26.0', '-isysroot', sdk, '-mcpu=apple-a16',
                            '-x', 'assembler', '-c', host / 'embed.S', '-o', host / 'embed.o'])

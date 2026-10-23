@@ -1,6 +1,6 @@
 """Materialize a build staging tree from the working tree.
 
-The stage is a full copy (never a writable hardlink) of the repository with six
+The stage is a full copy (never a writable hardlink) of the repository with seven
 fork-only source overlays and nine upstream hook patches applied.  Builds run
 only from the stage, so the working tree's upstream files stay untouched.
 """
@@ -28,6 +28,7 @@ OVERLAY_TARGETS = {
     'dm/gfx/nvn/nvn_spatial_size.h',
     'dm/ios/Sources/DmLaunchSettings.h',
     'dm/ios/Sources/DmLaunchSettings.m',
+    'dm/ios/Sources/DmPerfHud.m',
     'dm/ios/Sources/dm_bundle_defaults.h',
     'dm/ios/Sources/dm_launch_options.h',
 }

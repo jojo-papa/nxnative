@@ -1,5 +1,6 @@
 import io
 import json
+import os
 from pathlib import Path
 import shutil
 import struct
@@ -155,6 +156,30 @@ class PortableWindowsTools(unittest.TestCase):
                 self.assertEqual(first,second)
                 self.assertEqual(download.call_count,1)
                 self.assertEqual(download.call_args.kwargs['algorithm'],'sha256')
+
+    def test_spirv_publish_retries_a_transient_file_lock(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);source=root/'source.exe';destination=root/'destination.exe'
+            source.write_bytes(b'fixture')
+            real_replace=os.replace;calls=[]
+            def flaky_replace(a,b):
+                calls.append((a,b))
+                if len(calls)<3:raise PermissionError(13,'file is in use')
+                return real_replace(a,b)
+            with patch.object(windows.os,'replace',side_effect=flaky_replace),patch.object(windows.time,'sleep'):
+                windows.replace_with_retry(source,destination)
+            self.assertEqual(len(calls),3)
+            self.assertEqual(destination.read_bytes(),b'fixture')
+
+    def test_spirv_publish_reports_a_persistent_file_lock(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root=Path(directory);source=root/'source.exe';destination=root/'destination.exe'
+            source.write_bytes(b'fixture')
+            with patch.object(windows.os,'replace',side_effect=PermissionError(13,'file is in use')),patch.object(windows.time,'sleep'):
+                with self.assertRaisesRegex(RuntimeError,'another program is using it'):
+                    windows.replace_with_retry(source,destination,attempts=2)
+            self.assertTrue(source.is_file())
+            self.assertFalse(destination.exists())
 
     def test_spirv_build_is_static_and_probed_before_publish(self):
         with tempfile.TemporaryDirectory() as directory:
