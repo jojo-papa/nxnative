@@ -19,7 +19,7 @@ from .jobs import emit
 from .file_tools import filesystem_path, remove_stage
 from .platform_tools import tool_path, find_dotnet, dotnet_environment, probe
 
-PYTHON_PACKAGES = {'lz4': 'lz4', 'capstone': 'capstone', 'fontTools': 'fonttools', 'PIL': 'Pillow'}
+PYTHON_PACKAGES = {'lz4': 'lz4', 'capstone': 'capstone', 'fontTools': 'fonttools', 'PIL': 'Pillow', 'nsz': 'nsz==5.0.0'}
 BREW_PACKAGES = {'xcodegen', 'zstd', 'spirv-cross'}
 DOTNET_METADATA = 'https://builds.dotnet.microsoft.com/dotnet/release-metadata/10.0/releases.json'
 

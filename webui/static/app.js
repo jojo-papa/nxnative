@@ -31,6 +31,14 @@ async function loadUploadHistory() {
   catch (_) { uploadHistory = []; }
   renderUploadHistory();
 }
+function useSavedKeys() {
+  if (inputs.some(item => item.name.toLowerCase().endsWith('.keys'))) return;
+  const saved = uploadHistory.find(item => item.name.toLowerCase().endsWith('.keys'));
+  if (!saved) return;
+  inputs.push({id:saved.id, name:saved.name});
+  renderInputs();
+  renderUploadHistory();
+}
 const uploadRows = new Map();
 let activeUploads = 0;
 function uploadKey(file) {
@@ -128,7 +136,7 @@ function capability() {
   $('mac-option').classList.toggle('unavailable', !macAvailable);
   $('mac-option').title = macAvailable ? '' : t('macOS packaging requires a Mac.');
   if (!macAvailable) $('mac').checked = false;
-  $('capability').textContent = t(profile?.reason || (profile?.graphics === 'vulkan' ? 'Vulkan game: MetalFX spatial upscaling is unavailable.' : 'Exact registered game versions are required for application builds.'));
+  $('capability').textContent = t(profile?.reason || (profile?.graphics === 'vulkan' ? 'Vulkan game: MetalFX spatial upscaling is unavailable.' : 'No profile selected: an unregistered title is surveyed and built with a provisional profile; the app may not boot.'));
   $('spatial').disabled = profile?.graphics === 'vulkan';
   if ($('spatial').disabled) $('spatial').value = '0';
   const ios = $('ios').checked, building = $('kind').value === 'build';
@@ -299,4 +307,4 @@ $('clear-cache').onclick = action(async () => {
 $('ui-language').value = uiLanguage;
 translateStatic();
 $('ui-language').onchange = action(async () => {uiLanguage = $('ui-language').value; localStorage.setItem('nx-ui-language', uiLanguage); translateStatic(); renderInputs(); renderUploadHistory(); await loadEnvironment(); await refresh();});
-action(async () => { await api('session',{method:'POST'}); history.replaceState(null,'','/'); token=''; await loadEnvironment(); await loadUploadHistory(); await refresh(); setInterval(action(refresh),2500); })();
+action(async () => { await api('session',{method:'POST'}); history.replaceState(null,'','/'); token=''; await loadEnvironment(); await loadUploadHistory(); useSavedKeys(); await refresh(); setInterval(action(refresh),2500); })();

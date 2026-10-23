@@ -1,10 +1,13 @@
-"""Bounded PFS0/HFS0 parsing and streaming, lossless XCI repacking."""
+"""Bounded PFS0/HFS0 parsing and streaming, lossless XCI/NSZ conversion."""
 from dataclasses import dataclass
 import hashlib
+import importlib.util
 import json
 from pathlib import Path
+import shutil
 import struct
 import subprocess
+import sys
 
 
 @dataclass(frozen=True)
@@ -118,6 +121,22 @@ def repack(source, selected, destination, progress=lambda *args: None, hashes=No
         temporary.replace(destination)
     finally:
         temporary.unlink(missing_ok=True)
+
+
+def decompress_nsz(source, destination, keys, run, folder):
+    """Decompress an NSZ into NSPs with the MIT-licensed nsz package."""
+    if importlib.util.find_spec('nsz') is None:
+        raise ValueError('NSZ conversion needs the nsz Python package. Restart the WebUI so it can install it, then retry.')
+    destination = Path(destination)
+    if destination.exists():
+        shutil.rmtree(destination)
+    destination.mkdir(parents=True)
+    run(folder, [sys.executable, '-c', 'import nsz; nsz.main()', '-D', str(source),
+                 '-o', str(destination), '--keys', str(keys), '--overwrite', '--minimal-output'])
+    outputs = sorted(destination.rglob('*.nsp'))
+    if not outputs:
+        raise ValueError('NSZ decompression produced no NSP')
+    return outputs
 
 
 def catalog(extractor, keys, package):

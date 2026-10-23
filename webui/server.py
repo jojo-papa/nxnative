@@ -173,8 +173,8 @@ def create_app(root, token=None, config=None):
         name, size = value.get('name', ''), value.get('size', 0)
         if not isinstance(name, str) or Path(name).name != name or any(c in name for c in '\\/:'):
             raise ValueError('Invalid filename')
-        if Path(name).suffix.lower() not in ('.nsp', '.xci', '.keys'):
-            raise ValueError('Expected NSP, XCI or keys')
+        if Path(name).suffix.lower() not in ('.nsp', '.xci', '.nsz', '.keys'):
+            raise ValueError('Expected NSP, XCI, NSZ or keys')
         if type(size) is not int or size <= 0 or size > 256 * 1024**3:
             raise ValueError('Invalid file size')
         if name.lower().endswith('.keys') and size > 1024 * 1024:
@@ -210,8 +210,8 @@ def create_app(root, token=None, config=None):
     @app.post('/api/import')
     async def import_file(request: Request):
         path = Path((await request.json())['path']).expanduser().resolve()
-        if not path.is_file() or path.suffix.lower() not in ('.nsp', '.xci', '.keys'):
-            raise ValueError('Choose an existing NSP, XCI or keys file')
+        if not path.is_file() or path.suffix.lower() not in ('.nsp', '.xci', '.nsz', '.keys'):
+            raise ValueError('Choose an existing NSP, XCI, NSZ or keys file')
         identity = uuid.uuid4().hex
         write_json(inbox / (identity + '.json'), dict(name=path.name, size=path.stat().st_size, path=str(path), imported=True))
         return dict(id=identity, name=path.name)
@@ -238,7 +238,7 @@ def create_app(root, token=None, config=None):
         files = []
         for identity in value.get('files', []):
             _, item = upload_meta(identity)
-            if Path(item['path']).suffix.lower() not in ('.nsp', '.xci') or Path(item['path']).stat().st_size != item['size']:
+            if Path(item['path']).suffix.lower() not in ('.nsp', '.xci', '.nsz') or Path(item['path']).stat().st_size != item['size']:
                 raise ValueError('Game input is incomplete')
             files.append(item['path'])
         _, keys = upload_meta(value.get('keys', ''))

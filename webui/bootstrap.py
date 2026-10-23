@@ -11,7 +11,7 @@ DEFAULT_INDEX = 'https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple'
 PYTHON_INDEXES = (DEFAULT_INDEX, 'https://pypi.org/simple')
 
 PACKAGES = {'fastapi': 'fastapi', 'uvicorn': 'uvicorn', 'lz4': 'lz4',
-            'capstone': 'capstone', 'fonttools': 'fontTools', 'Pillow': 'PIL'}
+            'capstone': 'capstone', 'fonttools': 'fontTools', 'Pillow': 'PIL', 'nsz': 'nsz'}
 MINIMUM = {'fastapi': (0, 115), 'uvicorn': (0, 34)}
 
 def missing_dependencies():

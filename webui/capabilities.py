@@ -22,6 +22,7 @@ DEPENDENCY_HELP.update({'clang': ('https://github.com/mstorsjo/llvm-mingw/releas
 DEPENDENCY_HELP['mac_metal'] = ('https://developer.apple.com/documentation/Xcode/downloading-and-installing-additional-xcode-components', 'With Xcode installed and selected, downloads and installs its Metal Toolchain through the official xcodebuild command. Finish Xcode first-launch setup before installing.')
 
 DEPENDENCY_HELP['sdk'] = ('https://github.com/xybp888/iOS-SDKs/releases', 'Choose an iPhoneOS SDK version (26.5 or newer); missing SDKs download from xybp888/iOS-SDKs (third-party) with SHA-256 verification. Windows links are materialized automatically. Existing valid SDKs are reused; local archives remain supported.')
+DEPENDENCY_HELP['nsz'] = ('https://github.com/nicoboss/nsz', 'The MIT-licensed nsz package decompresses .nsz uploads to NSP. Install it here or let the WebUI install it at startup.')
 
 def profiles(system=None):
     system = system or platform.system()
@@ -86,10 +87,10 @@ def environment(config):
             checks.append(dict(name=name, path=found, available=available))
     packages = str(root / 'python-packages')
     if packages not in sys.path: sys.path.append(packages)
-    for name in ('lz4', 'capstone', 'fontTools', 'PIL'):
+    for name in ('lz4', 'capstone', 'fontTools', 'PIL', 'nsz'):
         checks.append(dict(name=name, path='Python package', available=importlib.util.find_spec(name) is not None))
     for check in checks:
-        check['label'] = {'dotnet': '.NET 10 SDK', 'macos_sdk': 'macOS SDK', 'iphoneos_sdk': 'iPhoneOS SDK (iOS packaging)', 'mac_metal': 'Xcode Metal compiler'}.get(check['name'], check['name'])
+        check['label'] = {'dotnet': '.NET 10 SDK', 'macos_sdk': 'macOS SDK', 'iphoneos_sdk': 'iPhoneOS SDK (iOS packaging)', 'mac_metal': 'Xcode Metal compiler', 'nsz': 'NSZ decompressor'}.get(check['name'], check['name'])
         check['help_url'], check['help_text'] = DEPENDENCY_HELP[check['name']]
         if check['name'] == 'sdk' and config.get('sdk_source') == 'local':
             check['help_text'] = 'Local mode: discovers existing iPhoneOS SDKs and imports local archives. Automatic SDK network downloads are disabled.'

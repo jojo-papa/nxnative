@@ -3,7 +3,8 @@ from pathlib import Path
 import struct
 import tempfile
 import unittest
-from webui.packages import entries, xci_entries, repack
+from unittest.mock import patch
+from webui.packages import decompress_nsz, entries, xci_entries, repack
 
 
 def container(magic, files):
@@ -66,6 +67,23 @@ class Containers(unittest.TestCase):
         out = self.root / 'out.nsp'
         with self.assertRaises(ValueError): repack(path, entries(path), out, hashes={'a':'00'})
         self.assertFalse(out.exists()); self.assertFalse(out.with_name('out.nsp.partial').exists())
+
+    def test_nsz_decompression_command_and_output(self):
+        source = self.root / 'update.nsz'; source.write_bytes(b'nsz')
+        keys = self.root / 'prod.keys'; keys.write_bytes(b'keys')
+        destination = self.root / 'nsz-out'
+        commands = []
+        def fake_run(folder, command):
+            commands.append([str(x) for x in command])
+            destination.mkdir(exist_ok=True)
+            (destination / 'update.nsp').write_bytes(b'nsp')
+        with patch('webui.packages.importlib.util.find_spec', return_value=object()):
+            outputs = decompress_nsz(source, destination, keys, fake_run, self.root)
+        self.assertEqual([path.name for path in outputs], ['update.nsp'])
+        self.assertIn('-D', commands[0])
+        self.assertIn('--minimal-output', commands[0])
+        self.assertEqual(Path(commands[0][commands[0].index('--keys') + 1]), keys)
+        self.assertEqual(Path(commands[0][commands[0].index('-o') + 1]), destination)
 
     def test_overlapping_entries(self):
         data = bytearray(container(b'PFS0', [('a', b'a'), ('b', b'b')]))

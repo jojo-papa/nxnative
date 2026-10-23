@@ -22,6 +22,9 @@ re-clone or run `git fetch origin && git reset --hard origin/main`. Full
 Windows and macOS builds still need validation on their target toolchains.
 Patches 0008/0009 carry the optional separate RomFS hooks
 (`NX_SEPARATE_ROMFS` / `--separate-romfs`); keep them when porting.
+`webui/provisional.py` mirrors upstream `scripts/build_ipa_from_nsp.py`'s
+survey and provisional-profile format for the WebUI; recheck it when that
+upstream code changes.
 The fork's ObjC launch settings remain the launcher on both iOS paths; the
 Windows cross-build compiles `launcher_stub.m` instead of the upstream
 SwiftUI `Launcher.swift`, and the Mac build sets `DM_LAUNCHER=0` so the Swift
