@@ -72,6 +72,14 @@ class Service(unittest.TestCase):
         self.assertNotIn('path',rows[0])
         self.assertNotIn('keys',rows[0])
 
+    def test_nsz_upload_and_convert_task(self):
+        jobs=self.app.state.jobs;jobs.stop.set();jobs.thread.join()
+        game=self.upload('update.nsz',b'nsz')
+        keys=self.upload('prod.keys',b'fixture')
+        response=self.client.post('/api/tasks',json=dict(files=[game],keys=keys,kind='convert',targets=['ios']))
+        self.assertEqual(response.status_code,200,response.text)
+        self.assertEqual(self.client.post(f"/api/tasks/{response.json()['id']}/cancel").status_code,200)
+
     def test_invalid_settings(self):
         game=self.upload();keys=self.upload('prod.keys',b'fixture')
         response=self.client.post('/api/tasks',json=dict(files=[game],keys=keys,settings={'DM_LANG':'invalid'}))
@@ -188,15 +196,15 @@ class Service(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'already using'):
             Jobs(self.root, REPO, {})
 
-    def test_uploaded_keys_removed_but_imports_preserved(self):
+    def test_uploaded_keys_are_kept_for_reuse(self):
         jobs=self.app.state.jobs;jobs.stop.set();jobs.thread.join()
         game=self.upload();keys=self.upload('prod.keys',b'fixture')
         identity=self.client.post('/api/tasks',json=dict(files=[game],keys=keys)).json()['id']
         source=Path(json.loads((jobs.folder(identity)/'task.json').read_text())['keys'])
         self.client.post(f'/api/tasks/{identity}/cancel')
-        self.assertFalse(source.exists())
+        self.assertTrue(source.exists())
 
-    def test_queued_tasks_keep_shared_uploaded_keys(self):
+    def test_uploaded_keys_are_shared_and_kept(self):
         jobs=self.app.state.jobs;jobs.stop.set();jobs.thread.join()
         game=self.upload();keys=self.upload('prod.keys',b'fixture')
         identities=[self.client.post('/api/tasks',json=dict(files=[game],keys=keys)).json()['id'] for _ in range(2)]
@@ -204,7 +212,7 @@ class Service(unittest.TestCase):
         self.client.post(f'/api/tasks/{identities[0]}/cancel')
         self.assertTrue(source.exists())
         self.client.post(f'/api/tasks/{identities[1]}/cancel')
-        self.assertFalse(source.exists())
+        self.assertTrue(source.exists())
 
     def test_missing_dependencies_have_official_help(self):
         with patch('webui.capabilities.platform.system', return_value='Windows'):

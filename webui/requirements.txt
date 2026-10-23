@@ -4,3 +4,4 @@ lz4
 capstone
 fonttools
 Pillow
+nsz==5.0.0

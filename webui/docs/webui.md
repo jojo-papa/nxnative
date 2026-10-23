@@ -1,6 +1,6 @@
 # Local build studio
 
-The WebUI uploads NSP/XCI files and keys, inspects content metadata, converts standard XCI files to NSP, and queues native Apple application builds. It runs on `127.0.0.1` with a per-launch browser session. No SQLite, database server, Node build, or queue service is used.
+The WebUI uploads NSP/XCI/NSZ files and keys, inspects content metadata, converts standard XCI files to NSP, decompresses NSZ files to NSP, and queues native Apple application builds. It runs on `127.0.0.1` with a per-launch browser session. No SQLite, database server, Node build, or queue service is used.
 
 ## Start
 
@@ -33,7 +33,9 @@ The preparer installs Python dependencies, builds the LibHac extractor, and writ
 | Apple Silicon macOS with the repository's build dependencies | Unsigned IPA | Standalone app ZIP |
 | Windows with LLVM/lld, Apple SDK, Metal compiler, .NET and spirv-cross | Offline NVN subset | Unavailable |
 
-Windows uses `webui/build/windows/build_ipa_windows.py`. It requires one shader version matching the packaged version and rejects games whose extracted sources require Vulkan, runtime shader capture, Unreal decoding, or Oodle capture. Graphics requirements are detected from the extracted game, not guessed from its name. macOS uses the existing NSP pipeline and its capture support. Application builds require a registered profile and its exact known builds; inspection also works for unregistered titles.
+Windows uses `webui/build/windows/build_ipa_windows.py`. It requires one shader version matching the packaged version and rejects games whose extracted sources require Vulkan, runtime shader capture, Unreal decoding, or Oodle capture. Graphics requirements are detected from the extracted game, not guessed from its name. macOS uses the existing NSP pipeline and its capture support.
+
+A title ID without a registered profile is surveyed from the base game and the newest supplied update, then built from a provisional profile in the task folder. This mirrors the upstream `scripts/build_ipa_from_nsp.py` fallback: the profile values are guessed from the game files and the resulting app may not boot. The task publishes `provisional.json` and `provisional-profile.tsv`, and the profile is never written into `dm/games`. Windows applies the same offline NVN restrictions to provisional builds; a game needing Mac capture is rejected with the reason. Inspection works without a profile and does not need this fallback.
 
 The header language selector switches between Simplified Chinese and English and remembers the choice in this browser. This affects only the WebUI; game language is a separate launch setting. Build-tool logs remain unchanged.
 
@@ -78,8 +80,8 @@ The WebUI does not accept arbitrary commands, package names or download URLs. In
 
 ## Workflow
 
-1. Upload files, or import existing absolute file paths to avoid another large upload. Chunk uploads resume after reselecting the same file in the same browser. Supply the base game and all profile-required updates.
-2. Choose **Build an app**, **Convert XCI to NSP**, or **Inspect game metadata**. For builds, choose iOS and/or macOS and the initial game language, handheld/docked mode, spatial upscaling, and output resolution. For iOS you can also tick **Separate IPA and RomFS** (off by default).
+1. Upload files, or import existing absolute file paths to avoid another large upload. Chunk uploads resume after reselecting the same file in the same browser. The newest saved keys file is selected automatically; previously uploaded files can be re-added from the upload history. Supply the base game and all profile-required updates.
+2. Choose **Build an app**, **Convert XCI/NSZ to NSP**, or **Inspect game metadata**. For builds, choose iOS and/or macOS and the initial game language, handheld/docked mode, spatial upscaling, and output resolution. For iOS you can also tick **Separate IPA and RomFS** (off by default). NSZ files can also be added directly to a build; they are decompressed before inspection. If the base title ID has no profile, the task first surveys the supplied base and newest update and continues with a provisional profile; review `provisional.json` and expect that the app may need bring-up.
 3. Follow the task journal and log. Cancel stops the worker process tree. Downloads are limited to published artifacts. A target failure preserves any successful output from another target.
 
 ### Separate IPA and RomFS (optional, iOS)
@@ -97,7 +99,9 @@ macOS `.app.zip` always includes its RomFS. If both targets are selected, the iO
 
 Language and operating mode apply before game launch. Both app launchers allow changing the defaults and restoring the packaged choices. Spatial upscaling uses Metal 4 FX on supported NVN devices, with ordinary presentation as fallback. It does not add frame generation or force the game's dynamic resolution off. Vulkan output disables the spatial option. The iOS Game Settings also has a **Performance HUD** toggle showing presented FPS, game input and presented output resolution, and app memory use/headroom. Game settings/save data can override the requested language. Device gameplay and scaling quality still require testing on Apple hardware.
 
-XCI conversion validates container bounds, partition hashes, CNMT content membership and content hashes, then streams the original encrypted NCA files into standard NSP containers. Multi-title secure partitions produce separate NSPs. Compressed/split formats are not supported. The converter does not acquire keys or game files.
+XCI conversion validates container bounds, partition hashes, CNMT content membership and content hashes, then streams the original encrypted NCA files into standard NSP containers. Multi-title secure partitions produce separate NSPs. Compressed/split XCI formats are not supported. The converter does not acquire keys or game files.
+
+NSZ uploads are losslessly decompressed to NSP with the pinned MIT-licensed `nsz` package, using the task's uploaded keys. The resulting NSPs are published as artifacts; a converted NSZ can then be used in a build like any other NSP. A modified/corrupt NSZ or XCI whose NCA hashes no longer match its metadata is rejected rather than converted into an invalid NSP.
 
 ## Local data and recovery
 
@@ -122,7 +126,7 @@ Build and conversion tasks show a stage-weighted progress bar in the task list, 
 
 **Output folder** in Environment & tools optionally copies finished artifacts out of the task data: the IPA, macOS `.app.zip`, separate RomFS archive and their `.sha256` files, plus converted NSPs from conversion tasks. Same-named files are overwritten by later builds; the task's own `outputs/` directory and its download links remain. Leave the setting empty to keep files only in the task data folder.
 
-Keys are never published as artifacts. Private task copies are removed after completion/cancellation unless explicitly retained. Service-owned uploaded keys are removed when no queued task still needs them; original files imported by path are never deleted. Retaining the task copy enables retry after its uploaded source is removed. Otherwise reimport keys and create a new job. Logs contain file paths and tool output, so keep the data directory private to your OS account.
+Keys are never published as artifacts. Uploaded keys stay in the data folder and appear in **Previously uploaded files**; the newest saved key is selected automatically for later tasks. Delete a saved key from the upload history when it should no longer be stored. Private task copies are removed after completion/cancellation unless explicitly retained, which keeps a retry working even if the saved upload is deleted. Original files imported by path are never deleted. Logs contain file paths and tool output, so keep the data directory private to your OS account.
 
 ## Validation
 

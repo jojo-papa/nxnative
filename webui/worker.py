@@ -9,11 +9,11 @@ import subprocess
 import sys
 import time
 
-from . import staging
+from . import provisional, staging
 from .build.romfs_archive import archive_path, discard_archive, verify_archive, verify_no_romfs
 from .capabilities import REPO, game, profiles
 from .jobs import emit
-from .packages import catalog, convert, entries
+from .packages import catalog, convert, decompress_nsz, entries
 
 
 def run(folder, command, env=None, cwd=None):
@@ -97,8 +97,11 @@ def execute(folder):
         elif source.suffix.lower() == '.nsp':
             entries(source)
             package_paths.append(source)
+        elif source.suffix.lower() == '.nsz':
+            emit(folder, 'stage', name='Decompressing NSZ')
+            converted += decompress_nsz(source, outputs / f'nsz-{number}', keys, run, folder)
         else:
-            raise ValueError('Only uncompressed NSP and XCI inputs are supported.')
+            raise ValueError('Only uncompressed NSP, XCI and NSZ inputs are supported.')
     package_paths += converted
     for path in converted:
         emit(folder, 'artifact', name=str(path.relative_to(outputs)))
@@ -113,15 +116,16 @@ def execute(folder):
     title = task.get('game') or (next(iter(bases)) if len(bases) == 1 else '')
     if title not in bases:
         raise ValueError('Choose one base game present in the input files.')
-    profile = next((p for p in profiles() if p['id'] == title), None)
-    report = dict(title_id=title, packages=[r for _, r in records], supported=bool(profile))
+    base_path = next(p for p, item in records if item['title_id'] == title and item['type'] == 0x80)
+    updates = sorted(((int(item['version']), p) for p, item in records
+                      if int(item['title_id'], 16) == int(title, 16) + 0x800), key=lambda item: item[0], reverse=True)
+    report = dict(title_id=title, packages=[r for _, r in records],
+                  supported=any(p['id'] == title for p in profiles()))
     (outputs / 'inspection.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
     emit(folder, 'artifact', name='inspection.json')
     if task['kind'] == 'inspect':
         emit(folder, 'stage', name='Extracting code and RomFS manifest')
-        base_path = next(p for p, item in records if item['title_id'] == title and item['type'] == 0x80)
-        updates = [(item['version'], p) for p, item in records if int(item['title_id'], 16) == int(title, 16) + 0x800]
-        update = max(updates)[1] if updates else '-'
+        update = updates[0][1] if updates else '-'
         survey = folder / 'survey'; survey.mkdir(exist_ok=True)
         run(folder, [extractor, keys, base_path, update, survey, '--manifest'])
         manifest = survey / 'romfs_manifest.tsv'
@@ -136,12 +140,43 @@ def execute(folder):
         report['module_build_ids'] = modules
         (outputs / 'inspection.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
         return
-    if profile is None:
-        raise ValueError('No registered profile. Inspection report is available; application build is disabled.')
-    for target in task['targets']:
-        if not profile[target]:
-            raise ValueError(profile['reason'] or 'Target unavailable on this host.')
-    g = game.load(title)
+    profile = next((p for p in profiles() if p['id'] == title), None)
+    provisional_build = profile is None
+    if provisional_build:
+        version = f'v{updates[0][0]}' if updates else 'v0'
+        emit(folder, 'stage', name=f'Surveying unregistered title {title}')
+        survey_facts = provisional.survey(REPO, extractor, keys, base_path, updates[0][1] if updates else None,
+                                          folder / 'survey', run, folder, version)
+        profile_dir = folder / 'profile' / title
+        provisional.write_profile(profile_dir, title, survey_facts)
+        g = game.load(str(profile_dir))
+        graphics = survey_facts['sources']['graphics'][0]
+        summary = provisional.report(survey_facts)
+        summary.update(title_id=title, profile=str(profile_dir))
+        (outputs / 'provisional.json').write_text(json.dumps(summary, indent=2), encoding='utf-8')
+        shutil.copyfile(profile_dir / 'game.tsv', outputs / 'provisional-profile.tsv')
+        emit(folder, 'artifact', name='provisional.json')
+        emit(folder, 'artifact', name='provisional-profile.tsv')
+        report.update(provisional=True, provisional_profile=str(profile_dir), graphics=graphics)
+        (outputs / 'inspection.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
+        if platform.system() not in ('Windows', 'Darwin'):
+            raise ValueError('Application builds require Windows or an Apple Silicon Mac.')
+        if platform.system() == 'Windows':
+            captured = [name for name in ('glslc_capture', 'vk_capture', 'ue_decode', 'oodle_packs', 'ue_legacy')
+                        if survey_facts['sources'][name][0]]
+            if graphics != 'nvn':
+                raise ValueError(f'Unregistered title {title} uses {graphics}; Windows builds support offline NVN games only.')
+            if captured:
+                raise ValueError('This unregistered title needs Mac runtime shader handling: ' + ', '.join(captured) + '.')
+        for target in task['targets']:
+            if target == 'mac' and platform.system() != 'Darwin':
+                raise ValueError('macOS packaging requires a Mac.')
+    else:
+        for target in task['targets']:
+            if not profile[target]:
+                raise ValueError(profile['reason'] or 'Target unavailable on this host.')
+        g = game.load(title)
+        graphics = profile['graphics']
     inputs = folder / 'inputs'
     retry = task.get('retry_of', '')
     if len(retry) == 32 and all(c in '0123456789abcdef' for c in retry):
@@ -165,14 +200,14 @@ def execute(folder):
                         raise ValueError('Cached input changed; create a new task instead of retrying.')
             selected.append(item)
     versions = {f"v{x['version']}" for x in selected if x['type'] in (0x80, 0x81)}
-    needed = set(g.words('shader_versions')) | {g.get('package')}
+    needed = {g.get('package')} if provisional_build else set(g.words('shader_versions')) | {g.get('package')}
     if not needed <= versions:
         raise ValueError('Missing required versions: ' + ', '.join(sorted(needed - versions)))
     settings = task['settings']
-    if profile['graphics'] == 'vulkan':
+    if graphics == 'vulkan':
         settings = dict(settings, DM_METALFX_SPATIAL='0')
     defaults = folder / 'launch-defaults.json'
-    defaults.write_text(json.dumps(dict(settings, NX_WEBUI_RELEASE='1', NX_GRAPHICS=profile['graphics'])), encoding='utf-8')
+    defaults.write_text(json.dumps(dict(settings, NX_WEBUI_RELEASE='1', NX_GRAPHICS=graphics)), encoding='utf-8')
     envfile = folder / 'launch.env'
     envfile.write_text('\n'.join(f'{k}={v}' for k, v in settings.items()) + '\n', encoding='utf-8')
     env = dict(os.environ, NX_PROGRESS='1', NX_LAUNCH_DEFAULTS=str(defaults))
@@ -204,16 +239,20 @@ def execute(folder):
         if separate_target:
             discard_archive(archive)
         if platform.system() == 'Windows':
-            command = [sys.executable, stage / 'webui/build/windows/build_ipa_windows.py', inputs, '--game', title,
+            command = [sys.executable, stage / 'webui/build/windows/build_ipa_windows.py', inputs,
+                       '--game', str(g.dir) if provisional_build else title,
                        '--keys', keys, '--tools', toolroot, '--out', output, '--env-file', envfile,
                        '--launch-defaults', defaults]
             for option in ('sdk', 'metal'):
                 if config.get(option): command += ['--' + option, config[option]]
             if separate_target: command += ['--separate-romfs']
+            if provisional_build: command += ['--provisional']
         else:
             command = [sys.executable, stage / 'scripts/build_ipa_from_nsp.py', inputs, '--keys', keys,
                        '--target', target, '--out', output, '--env-file', envfile, '--keep-extracted', '--progress', 'off']
             if separate_target: command += ['--separate-romfs']
+            if provisional_build:
+                command += ['--provisional', '--profile-out', str((folder / 'profile').resolve())]
         try:
             run(folder, command, env, cwd=stage)
             if not output.is_file():
@@ -244,6 +283,8 @@ def execute(folder):
             emit(folder, 'target', target=target, status='failed', message=str(error))
     if failed:
         raise RuntimeError('Failed targets: ' + ', '.join(failed) + '. Any successful outputs remain downloadable.')
+    if provisional_build:
+        emit(folder, 'stage', name='Provisional profile: the app may not boot until brought up')
 
 
 if __name__ == '__main__':

@@ -8,7 +8,7 @@ its original paths; everything here is safe to change without touching upstream.
 - `server.py`, `jobs.py`, `worker.py`: loopback FastAPI service and serial tasks.
 - `capabilities.py`, `dependencies.py`, `apple_tools.py`, `windows_tools.py`:
   environment checks and tool installation.
-- `packages.py`, `file_tools.py`: NSP/XCI inspection and conversion helpers.
+- `packages.py`, `file_tools.py`: NSP/XCI inspection, XCI conversion and NSZ decompression helpers.
 - `repo.py`: repository root, upstream game module import and git exclude helper.
 - `staging.py`: materializes the build staging tree (source snapshot + overlays + patches).
 - `diffapply.py`: line-ending-normalizing unified-diff applier used by staging and tests.

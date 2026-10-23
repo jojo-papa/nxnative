@@ -3,6 +3,8 @@
 
 Run from a terminal or edit Settings and use Spyder F5. The original Mac
 profile is copied into the game's build folder before adapting the chain.
+With --provisional, the profile may be a WebUI survey: build IDs and shader
+evidence are generated from this extraction instead of compared with it.
 """
 import argparse
 import hashlib
@@ -39,6 +41,7 @@ def main():
     ap.add_argument('--env-file', type=Path)
     ap.add_argument('--launch-defaults', type=Path)
     ap.add_argument('--separate-romfs', action='store_true', help='Leave the RomFS out of the IPA and write <ipa>.romfs.zip')
+    ap.add_argument('--provisional', action='store_true', help='Build from a provisional profile (build IDs and shader evidence are generated from this extraction)')
     ap.add_argument('--font', type=Path, default=Path('C:/Windows/Fonts/msyh.ttc'))
     ap.add_argument('--letter-font', type=Path, default=Path('C:/Windows/Fonts/arialbd.ttf'))
     a = ap.parse_args()
@@ -137,10 +140,11 @@ def main():
                                    updates[0] if updates else '-', extracted])
         sentinel.write_text(json.dumps(inputs, indent=2), encoding='utf-8')
     wanted = g.builds()[version]
-    for module in g.words('modules'):
-        got = (extracted / 'ExeFS' / module).read_bytes()[0x40:0x50].hex()
-        if got != wanted[module]:
-            raise ValueError(f'{module} build ID differs: {got} / expected {wanted[module]}')
+    if not a.provisional:
+        for module in g.words('modules'):
+            got = (extracted / 'ExeFS' / module).read_bytes()[0x40:0x50].hex()
+            if got != wanted[module]:
+                raise ValueError(f'{module} build ID differs: {got} / expected {wanted[module]}')
     import profile_guess
     sources = profile_guess.build_sources(extracted / 'ExeFS', extracted / 'RomFS', g.words('modules'))
     if sources['graphics'][0] != 'nvn' or any(sources[k][0] for k in ('glslc_capture', 'vk_capture', 'ue_decode', 'oodle_packs')):
@@ -181,13 +185,18 @@ def main():
                              shader / 'packages', *[tables / name for name in names]])
     def rows(p):
         return [line for line in p.read_bytes().splitlines() if not line.startswith(b'#')]
-    for name in names:
-        if rows(tables / name) != rows(original.table(name)):
-            raise ValueError(f'{name} differs from the existing profile; refusing to replace its evidence')
+    if a.provisional:
+        for name in names:
+            shutil.copyfile(tables / name, profile / name)
+    else:
+        for name in names:
+            if rows(tables / name) != rows(original.table(name)):
+                raise ValueError(f'{name} differs from the existing profile; refusing to replace its evidence')
     files = sorted((shader / 'packages').glob('*.bin')) + [tables / name for name in names]
     split_marker.write_text(json.dumps(dict(inputs=inputs, main_sha256=nso_sha,
         files={p.relative_to(shader).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest() for p in files}), indent=2), encoding='utf-8')
-    print('All shader evidence tables match the existing profile exactly', flush=True)
+    print('Shader evidence tables generated from this extraction' if a.provisional
+          else 'All shader evidence tables match the existing profile exactly', flush=True)
     windows = build / 'windows_shaders'
     shader_rows = [line.split('\t') for line in (tables / 'shader_map.tsv').read_text(encoding='utf-8').splitlines()
                    if line and not line.startswith('#')]
@@ -264,7 +273,10 @@ def main():
     report_path = ipa.with_suffix('.verification.json')
     report = json.loads(report_path.read_text(encoding='utf-8'))
     report['ipa_sha256'] = digest
-    report['shader_evidence_matches_existing_profile'] = True
+    report['shader_evidence_matches_existing_profile'] = not a.provisional
+    report['provisional_profile'] = bool(a.provisional)
+    report['provisional_profile_path'] = str(original.dir) if a.provisional else None
+    report['may_not_boot'] = bool(a.provisional)
     if archive is not None:
         report.update(romfs_separate=True, romfs_bundled=False,
                       romfs_archive=str(archive.resolve()), romfs_archive_sha256=archive_digest)
