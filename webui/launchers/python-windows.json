@@ -1,0 +1,19 @@
+{
+  "version": "3.13.16",
+  "architectures": {
+    "AMD64": {
+      "sha256": "95fad176338f1d6a799e45946488063f4aa61764e6cff2f132ddeffbf7a04c34",
+      "sources": [
+        "https://repo.huaweicloud.com/artifactory/api/nuget/v3/nuget-remote/python/3.13.16/python.3.13.16.nupkg",
+        "https://api.nuget.org/v3-flatcontainer/python/3.13.16/python.3.13.16.nupkg"
+      ]
+    },
+    "ARM64": {
+      "sha256": "bfd77aa5b0edff4a7936a3220e8b79e7c78f864ce13e8fa2c835d9946e11694a",
+      "sources": [
+        "https://repo.huaweicloud.com/artifactory/api/nuget/v3/nuget-remote/pythonarm64/3.13.16/pythonarm64.3.13.16.nupkg",
+        "https://api.nuget.org/v3-flatcontainer/pythonarm64/3.13.16/pythonarm64.3.13.16.nupkg"
+      ]
+    }
+  }
+}
