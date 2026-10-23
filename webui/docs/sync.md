@@ -6,15 +6,22 @@ Upstream: <https://github.com/seedds/nxnative>
 
 | Ref | Commit |
 |---|---|
-| fork base | `233f18f421344fcd3b61559459ef8649d6c38a54` |
-| fork reference | `a8bfd0ddac3a976b770e05db64f3932d29772ce8` |
-| upstream main (2026-10-23) | `a08bbdd3ba144a6de4db39576cd0512786573eb7` |
+| stable fork main (previous) | `77dee3dab542d19a76e0cbb7175d3b6726ad275c` (based on `233f18f`) |
+| upstream main (2026-10-23) | `eab15b5a7e339d172ba7cd6b1a298ec3cf1e16b6` |
+| sync branch | `sync/upstream-20261023` (vendor drop of upstream `eab15b5`) |
+| ported hooks | `18e488271dd3a0bbd17a7a5d2acadc6b1f648cf1` |
+| merge base | `bc5815acc975ba223dff72df8a5cc98c43e97e0e` |
 
-The histories have diverged (the GitHub compare reported 125 commits ahead and
-27 behind relative to the base). The nine hook patches in `webui/patches/` are
-pinned to the fork base. Patches 0008/0009 also carry the optional separate
+The sync branch is a vendor drop: it starts at upstream `eab15b5`, the fork
+tree (`webui/`, `FORK.md`, root launchers and `.gitattributes`) was copied
+from `77dee3d`, and the nine hook patches were ported and regenerated against
+`upstream/main`. The previous fork main stays stable until this branch is
+validated on Apple hardware. Patches 0008/0009 carry the optional separate
 RomFS hooks (`NX_SEPARATE_ROMFS` / `--separate-romfs`); keep them when porting.
-Do not merge upstream blind; port the hooks first.
+The fork's ObjC launch settings remain the launcher on both iOS paths; the
+Windows cross-build compiles `launcher_stub.m` instead of the upstream
+SwiftUI `Launcher.swift`, and the Mac build sets `DM_LAUNCHER=0` so the Swift
+launcher stays out of the way.
 
 ## One-time setup
 
