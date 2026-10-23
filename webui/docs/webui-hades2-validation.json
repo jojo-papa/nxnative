@@ -1,0 +1,21 @@
+{
+  "bytes": 4337825909,
+  "files": 5418,
+  "shader_keys": 88,
+  "chain": "eca7e8fa4f70",
+  "signed": false,
+  "minimum_ios": "26.0",
+  "missing_shader_keys": [],
+  "unresolved_binding_shaders": [],
+  "archive_source_hashes_verified": true,
+  "runtime_tested": false,
+  "ipa_sha256": "f421dfa8ae78ec709bb21ae3cff8ff683cb8dcf312163ecd11835ec6410cd977",
+  "shader_evidence_matches_existing_profile": true,
+  "title_id": "0100A00019DE0000",
+  "display_version": "0.0.126424",
+  "host": "Windows AMD64",
+  "base_commit": "233f18f421344fcd3b61559459ef8649d6c38a54",
+  "compiled_sources": 129,
+  "extractor_build": "0 warnings, 0 errors",
+  "validation_date": "2026-10-21"
+}
