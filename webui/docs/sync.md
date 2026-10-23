@@ -6,18 +6,22 @@ Upstream: <https://github.com/seedds/nxnative>
 
 | Ref | Commit |
 |---|---|
-| stable fork main (previous) | `77dee3dab542d19a76e0cbb7175d3b6726ad275c` (based on `233f18f`) |
+| main (current) | `a4a528ca3055dd9634ec6a9745cf2aca166ac9a6` (vendor drop of upstream `eab15b5`) |
+| pre-sync main (backup branch) | `77dee3dab542d19a76e0cbb7175d3b6726ad275c` on `backup/main-before-upstream-20261023` |
 | upstream main (2026-10-23) | `eab15b5a7e339d172ba7cd6b1a298ec3cf1e16b6` |
-| sync branch | `sync/upstream-20261023` (vendor drop of upstream `eab15b5`) |
+| sync branch (same tree) | `sync/upstream-20261023` |
 | ported hooks | `18e488271dd3a0bbd17a7a5d2acadc6b1f648cf1` |
 | merge base | `bc5815acc975ba223dff72df8a5cc98c43e97e0e` |
 
-The sync branch is a vendor drop: it starts at upstream `eab15b5`, the fork
-tree (`webui/`, `FORK.md`, root launchers and `.gitattributes`) was copied
-from `77dee3d`, and the nine hook patches were ported and regenerated against
-`upstream/main`. The previous fork main stays stable until this branch is
-validated on Apple hardware. Patches 0008/0009 carry the optional separate
-RomFS hooks (`NX_SEPARATE_ROMFS` / `--separate-romfs`); keep them when porting.
+`main` was force-pushed to the vendor drop on 2026-10-23: it starts at
+upstream `eab15b5`, the fork tree (`webui/`, `FORK.md`, root launchers and
+`.gitattributes`) was copied from `77dee3d`, and the nine hook patches were
+ported and regenerated against `upstream/main`. The pre-sync history is kept
+on `backup/main-before-upstream-20261023`. Clones created before the sync must
+re-clone or run `git fetch origin && git reset --hard origin/main`. Full
+Windows and macOS builds still need validation on their target toolchains.
+Patches 0008/0009 carry the optional separate RomFS hooks
+(`NX_SEPARATE_ROMFS` / `--separate-romfs`); keep them when porting.
 The fork's ObjC launch settings remain the launcher on both iOS paths; the
 Windows cross-build compiles `launcher_stub.m` instead of the upstream
 SwiftUI `Launcher.swift`, and the Mac build sets `DM_LAUNCHER=0` so the Swift
@@ -81,15 +85,14 @@ edit.
 
 ## Publishing the fork
 
-After the refactor, upstream sync and tests are complete:
+`main` now holds the `eab15b5` vendor drop. Push follow-up commits normally:
 
 ```sh
 git push origin main
 ```
 
 `origin` is `https://github.com/xbunax/nxnative.git`. Push only a verified
-branch; do not force-push. If the sync branch is reviewed separately, push that
-branch first and open a pull request instead of rewriting `main`.
+branch; do not force-push again without first creating a fresh backup branch.
 
 ## Rollback
 

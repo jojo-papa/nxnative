@@ -46,13 +46,13 @@ the Windows builder and patches 0008/0009 carry the hooks. The app reads
 
 ## Upstream sync
 
-The upstream remote is `https://github.com/seedds/nxnative.git`. The stable
-fork's previous main was based on `233f18f` (commit `77dee3d`); the
-`sync/upstream-20261023` branch is a vendor drop based on upstream `eab15b5`,
-with the fork tree copied in and the nine hook patches regenerated against
-that upstream. Do not merge upstream blindly: follow `webui/docs/sync.md`,
-port the hook patches onto the new upstream tree and refresh
-`webui/patches/`. `webui/tools/sync_check.py` reports upstream-owned edits and
-patch applicability.
+The upstream remote is `https://github.com/seedds/nxnative.git`. On 2026-10-23
+`main` was moved to a vendor drop of upstream `eab15b5`, with the fork tree
+copied in and the nine hook patches regenerated against that upstream. The
+pre-sync history is preserved on `backup/main-before-upstream-20261023`
+(commit `77dee3d`, based on `233f18f`). Do not merge upstream blindly: follow
+`webui/docs/sync.md`, port the hook patches onto the new upstream tree and
+refresh `webui/patches/`. `webui/tools/sync_check.py` reports upstream-owned
+edits and patch applicability.
 
 See `webui/README.md` for the developer overview.
