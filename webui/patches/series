@@ -1,0 +1,12 @@
+# <patch file> <repository-relative target>
+# Base: 233f18f421344fcd3b61559459ef8649d6c38a54
+# Fork ref: a8bfd0ddac3a976b770e05db64f3932d29772ce8
+0001-shader-split-posix-paths.patch dm/gfx/tools/shader_split.py
+0002-gen-embed-posix-paths-sections.patch dm/ios/tools/gen_embed.py
+0003-hle-count-targetconditionals.patch dm/host/hle_count.c
+0004-nx-extract-catalog.patch dm/tools/nx_extract/Program.cs
+0005-host-makefile-metalfx.patch dm/host/Makefile
+0006-nvn-mtl-spatial-upscaling.patch dm/gfx/nvn/nvn_mtl.m
+0007-main-launch-settings.patch dm/ios/Sources/main.m
+0008-build-ipa-launch-defaults.patch dm/ios/tools/build_ipa.sh
+0009-build-ipa-from-nsp-webui.patch scripts/build_ipa_from_nsp.py
