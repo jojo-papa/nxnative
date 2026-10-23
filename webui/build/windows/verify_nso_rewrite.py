@@ -36,12 +36,15 @@ def verify(nso, patched, name):
     patch_offset = int(headers['PATCH_OFF'], 0)
     patch_file = int(headers.get('FILE_IMAGE_LEN', headers['PATCH_OFF']), 0)
     patch_length = len(image) - patch_file
-    points, windows = {}, []
+    points, windows, spin_edges = {}, [], []
     for line in (patched / f'{name}.sites.tsv').read_text().splitlines():
         columns = line.split('\t')
         address = int(columns[0], 0)
         if columns[1] == 'W':
             windows.append((address, int(columns[2], 0)))
+        elif columns[1] == 'S':
+            # The head stays original; only the back-edges branch into the copied region.
+            spin_edges.extend(int(item, 0) for column in columns[2:] for item in column.split())
         elif columns[1] not in ('J', 'T'):
             points[address] = columns[1]
     md = capstone.Cs(capstone.CS_ARCH_ARM64, capstone.CS_MODE_ARM)
@@ -74,7 +77,7 @@ def verify(nso, patched, name):
                  if points.get(a) != kind and not any(lo <= a < hi for lo, hi in windows)]
     if uncovered:
         raise ValueError(f'{name}: uncovered sites: {uncovered[:20]}')
-    for address in sorted(set(points) | {lo for lo, _ in windows}):
+    for address in sorted(set(points) | {lo for lo, _ in windows} | set(spin_edges)):
         word = struct.unpack_from('<I', image, address)[0]
         if points.get(address) == 'ctr':
             register = struct.unpack_from('<I', original, address)[0] & 31

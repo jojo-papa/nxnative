@@ -13,6 +13,13 @@ import struct
 import subprocess
 
 
+def sdk_version(path):
+    try:
+        return str(json.loads((path / 'SDKSettings.json').read_text(encoding='utf-8')).get('Version') or '26.5')
+    except (OSError, ValueError):
+        return '26.5'
+
+
 def macho_layout(data):
     if struct.unpack_from('<II', data) != (0xfeedfacf, 0x100000c):
         raise ValueError('Expected 64-bit ARM64 Mach-O')
@@ -65,8 +72,8 @@ def main():
     embed_sections, _, _, _ = macho_layout(embed_data)
     frameworks = re.findall(r'-framework (\w+)', (root / 'dm/host/Makefile').read_text(encoding='utf-8'))
     frameworks = [f for f in frameworks if f != 'Cocoa']
-    frameworks += ['UIKit', 'Foundation', 'GameController', 'CoreText', 'CoreGraphics', 'AVFAudio']
-    command = ['-arch', 'arm64', '-platform_version', 'ios', '26.0', '26.5', '--error-limit=0',
+    frameworks += ['UIKit', 'Foundation', 'GameController', 'CoreText', 'CoreGraphics', 'AVFAudio', 'CoreMotion', 'MetalFX']
+    command = ['-arch', 'arm64', '-platform_version', 'ios', '26.0', sdk_version(sdk), '--error-limit=0',
                '-syslibroot', str(sdk), '-F', str(sdk / 'System/Library/Frameworks'),
                '-F', str(sdk / 'System/Library/SubFrameworks'), '-L', str(sdk / 'usr/lib'),
                '-e', '_main', '-dead_strip', '-no_adhoc_codesign',

@@ -31,6 +31,7 @@ class StagingTests(unittest.TestCase):
             root = Path(folder)
             tree = staging.ensure(REPO, root, force=True)
             self.assertTrue((tree / 'dm/ios/Sources/DmLaunchSettings.m').is_file())
+            self.assertTrue((tree / 'dm/ios/Sources/DmPerfHud.m').is_file())
             self.assertIn('nvn_spatial.inc', (tree / 'dm/gfx/nvn/nvn_mtl.m').read_text(encoding='utf-8'))
             self.assertIn('webui/build/macos/pack_app.py',
                           (tree / 'scripts/build_ipa_from_nsp.py').read_text(encoding='utf-8'))

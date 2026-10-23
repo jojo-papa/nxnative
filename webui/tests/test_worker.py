@@ -38,7 +38,7 @@ class WorkerSeparateRomfsTests(unittest.TestCase):
         (self.folder / 'task.json').write_text(json.dumps(value), encoding='utf-8')
         return value
 
-    def run_build(self, targets=('ios',), separate=False, system='Windows'):
+    def run_build(self, targets=('ios',), separate=False, system='Windows', output=None):
         task = self.task(targets, separate)
         commands = []
         marker = worker.game.load(TITLE).get('romfs_marker')
@@ -55,6 +55,7 @@ class WorkerSeparateRomfsTests(unittest.TestCase):
                     archive.writestr('romfs/' + marker, b'marker')
 
         config = {'tools': str(self.root / 'tools')}
+        if output is not None: config['output'] = str(output)
         profiles = [{'id': TITLE, 'graphics': 'nvn', 'ios': True, 'mac': True, 'reason': ''}]
         with patch.dict(os.environ, NX_WEB_CONFIG=json.dumps(config), NX_STAGE_ROOT=str(self.root / 'stage-root')), \
              patch.object(worker.platform, 'system', return_value=system), \
@@ -94,10 +95,27 @@ class WorkerSeparateRomfsTests(unittest.TestCase):
         self.assertNotIn('--separate-romfs', commands[0])
         self.assertIn('--separate-romfs', commands[1])
 
+    def test_output_folder_receives_finished_artifacts(self):
+        delivered = self.root / 'delivered'
+        artifacts, commands = self.run_build(separate=True, output=delivered)
+        self.assertIn(TITLE + '.ipa', artifacts)
+        for name in (TITLE + '.ipa', TITLE + '.ipa.sha256', TITLE + '.romfs.zip', TITLE + '.romfs.zip.sha256'):
+            self.assertTrue((delivered / name).is_file(), name)
+        self.assertEqual((delivered / (TITLE + '.ipa')).read_bytes(),
+                         (self.folder / 'outputs' / (TITLE + '.ipa')).read_bytes())
+
     def test_mac_only_separate_is_rejected(self):
         self.task(('mac',), True)
         with patch.dict(os.environ, NX_WEB_CONFIG=json.dumps({'tools': str(self.root / 'tools')})):
             with self.assertRaisesRegex(ValueError, 'iOS target'):
+                worker.execute(self.folder)
+
+    def test_selected_missing_sdk_blocks_build(self):
+        self.task()
+        config = {'tools': str(self.root / 'tools'), 'sdk_version': '27.0'}
+        with patch.dict(os.environ, NX_WEB_CONFIG=json.dumps(config)), \
+             patch.object(worker.platform, 'system', return_value='Windows'):
+            with self.assertRaisesRegex(ValueError, 'SDK version'):
                 worker.execute(self.folder)
 
 
