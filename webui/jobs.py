@@ -51,6 +51,7 @@ BUILD_STAGE_PROGRESS = (
     ('preparing staged sources', 0.02),
     ('building ', 0.03),
     ('converting xci', 0.04),
+    ('decompress', 0.04),
     ('build nx_extract', 0.05),
     ('survey', 0.05),
     ('prepare xcode', 0.70),
@@ -224,13 +225,8 @@ class Jobs:
         task = json.loads((folder / 'task.json').read_text(encoding='utf-8'))
         if not task.get('retain_keys'):
             (folder / 'private.keys').unlink(missing_ok=True)
-        # Only delete service-owned uploads; user-imported originals stay untouched.
-        source = Path(task.get('keys', '')).resolve()
-        if source.parent == (self.root / 'inbox').resolve() and source.suffix == '.keys':
-            waiting = [json.loads((self.directory / identity / 'task.json').read_text(encoding='utf-8'))
-                       for identity in self.pending]
-            if not any(item.get('keys') == str(source) for item in waiting):
-                source.unlink(missing_ok=True)
+        # The keys upload stays in the inbox for reuse. Delete it explicitly from
+        # the upload history when it is no longer needed.
 
     def cancel(self, identity):
         folder = self.folder(identity)
