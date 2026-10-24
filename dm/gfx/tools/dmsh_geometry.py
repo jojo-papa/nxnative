@@ -54,9 +54,14 @@ def capture(src):
             offset = {'point_size': 4, 'render_target_array_index': 13, 'viewport_array_index': 14}[v[3]]
             stores.append(f'dm_p[{offset}] = as_type<uint>(out.{v[2]});')
             continue
-        v = re.fullmatch(r'float (\w+)\[(\d+)\] \[\[clip_distance\]\];', line)
-        if v and int(v[2]) <= 8:
-            stores += [f'dm_p[{5 + c}] = as_type<uint>(out.{v[1]}[{c}]);' for c in range(int(v[2]))]
+        # spirv-cross writes the array size after the attribute (float gl_ClipDistance [[clip_distance]] [8]; Luigi's Mansion 3's vertex shaders)
+        v = re.fullmatch(r'float (\w+)(?:\[(\d+)\])? \[\[clip_distance\]\](?: \[(\d+)\])?;', line)
+        if v and (v[2] or v[3]) and int(v[2] or v[3]) <= 8:
+            stores += [f'dm_p[{5 + c}] = as_type<uint>(out.{v[1]}[{c}]);' for c in range(int(v[2] or v[3]))]
+            continue
+        v = re.fullmatch(r'float (\w+) \[\[user\(clip(\d)\)\]\];', line)   # the same distances again as varyings for the pixel stage (gl_ClipDistance_0 [[user(clip0)]])
+        if v:
+            stores.append(f'dm_p[{5 + int(v[2])}] = as_type<uint>(out.{v[1]});')
             continue
         raise ValueError('geometry capture: unknown output ' + line)
     params += f', constant dm_geometry_capture& dm_gs [[buffer({CAPTURE_SLOT})]]'

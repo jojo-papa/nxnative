@@ -14,7 +14,7 @@ static int fail, count;
 
 static void check_color(int blue, const prog_t *pg, tex_t t[4]) {
     uint64_t same = g_fzc_same, diff = g_fzc_diff;
-    state_reset(); S.prog = pg;
+    state_reset(); S.prog = pg; S.bst[0] = S.bst[1] = pg;   // the redraw takes the program again from the per-stage bindings (prog_resolve)
     memset(&R, 0, sizeof R); R.has_rt = 1; R.rt.n = 4;
     for (int i = 0; i < 4; i++) R.rt.color[i] = &t[i];
     R.clear_c[3] = 1; R.cc[3] = MTLClearColorMake(!blue, 0, blue, 1);
