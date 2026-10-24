@@ -8,7 +8,7 @@ applied only to the staging tree created by `webui/staging.py`.
 - Hooks commit: `7f222f206bac6664c4a9923a56cac8807751936b`
 - Patches were regenerated with
   `git diff --no-ext-diff --unified=3 upstream/main -- <target>` from the ported hooks branch.
-- The 2026-10-24 sync starts at upstream `fa69e20`; `sync/upstream-20261024` holds the same tree. The pre-sync main (`c586dd1`) is preserved on `backup/main-before-upstream-20261024`.
+- The 2026-10-24 sync merges upstream `fa69e20` into `main`; `sync/upstream-20261024` is the vendor-drop equivalent with the same tree. The pre-sync main (`c586dd1`) is preserved on `backup/main-before-upstream-20261024`.
 - `series` lists the patch file and its target. The applier rejects a target
   that differs from the series entry or escapes the tree.
 - Patch files are LF. The source checkout uses CRLF; `webui/diffapply.py`
