@@ -1,8 +1,8 @@
 diff --git a/scripts/build_ipa_from_nsp.py b/scripts/build_ipa_from_nsp.py
-index 637f529..85ae131 100755
+index 2cf3391..89ac729 100755
 --- a/scripts/build_ipa_from_nsp.py
 +++ b/scripts/build_ipa_from_nsp.py
-@@ -97,6 +97,9 @@ class Progress:
+@@ -105,6 +105,9 @@ class Progress:
  
      def stage(self, name, poll=None, step='', **kw):
          """Start the next stage, ending the current one. kw: set()'s arguments"""
@@ -12,7 +12,7 @@ index 637f529..85ae131 100755
          with self.lock:
              self.end()
              self.k += 1; now = time.time()
-@@ -1313,6 +1316,8 @@ def parse_args(argv):
+@@ -1472,6 +1475,8 @@ def parse_args(argv):
      ap.add_argument('-l', '--language', help='game language, a code or a name: ja, fr, de, es, it, nl, pt, ru, ko, zh-Hans, zh-Hant, en-GB, fr-CA, es-419, pt-BR, Japanese, ... (default: the LANGUAGE setting, else English); '
                      'it must be one the game supports, which the console lists')
      ap.add_argument('--keep-extracted', action=argparse.BooleanOptionalAction, help='keep the extracted game files after the IPA is built, for the next build (default: the KEEP_EXTRACTED setting, on)')
@@ -21,7 +21,7 @@ index 637f529..85ae131 100755
      ap.add_argument('--env-file', help='environment switches for a diagnostic build (one KEY=VALUE per line)')
      ap.add_argument('--show-fps', action=argparse.BooleanOptionalAction, help='show the game\'s frame rate on the iPhone, frames on screen per second at the top left (default: the SHOW_FPS setting, on)')
      ap.add_argument('--survey-only', action='store_true', help='a game with no profile: only the survey, no provisional profile and no IPA')
-@@ -1342,10 +1347,15 @@ def report_profile_status(g, reg, pkg_ver, derived, provisional, prepare_xcode=F
+@@ -1501,10 +1506,15 @@ def report_profile_status(g, reg, pkg_ver, derived, provisional, artifact='IPA')
  
  def main(args=None):
      args = args or parse_args([])
@@ -35,9 +35,9 @@ index 637f529..85ae131 100755
 +    from webui.build.romfs_archive import (archive_path, pack_command, prepare_archive,
 +                                           verify_archive, verify_no_romfs)
      prepare_xcode = args.prepare_xcode or PREPARE_XCODE
-     keep = KEEP_EXTRACTED if args.keep_extracted is None else args.keep_extracted
-     if prepare_xcode and not keep: raise BuildError('--prepare-xcode requires --keep-extracted: Xcode builds from the extracted files')
-@@ -1456,6 +1466,12 @@ def main(args=None):
+     platform = args.platform or PLATFORM
+     if platform not in ('ios', 'mac'): raise BuildError(f'PLATFORM / --platform must be ios or mac: {platform}')
+@@ -1623,6 +1633,12 @@ def main(args=None):
      # how the shaders are got follows from the packed version's files (profile_guess.py shader_sources): the graphics API, and the shaders made only at run time
      src = pg.build_sources(game / 'ExeFS', game / 'RomFS', g.words('modules'))
      gfx = src['graphics'][0]   # nvn, vulkan (Hades: the host's Vulkan layer, SPIR-V shaders) or gl (Digimon Story Cyber Sleuth: the host's GL layer, GLSL sources)
@@ -48,11 +48,11 @@ index 637f529..85ae131 100755
 +        launch_path.write_text(json.dumps(launch), encoding='utf-8')
 +        env['NX_LAUNCH_DEFAULTS'] = str(launch_path)
      glslc = gfx == 'nvn' and src['glslc_capture'][0]   # shaders the game compiles at run time, captured in the Mac host (capture_glslc)
-     vkcap = gfx == 'vulkan' and src['vk_capture'][0]   # SPIR-V shaders the game generates at run time, captured in the Mac host (capture_vk)
-     uedec = gfx == 'nvn' and src['ue_decode'][0]   # Unreal Engine shaders, Oodle-compressed in the paks' shader code archives, decoded in the Mac host (decode_ue_shaders)
-@@ -1506,9 +1522,21 @@ def main(args=None):
-         pkey = split_shaders(py, repo, [dirs[v] / 'RomFS' for v in sv], [dirs[v] / 'ExeFS/main' for v in sv], sh / 'pkg', env, logs, g, own, oodle)
-         ios = build_shaders(py, repo, sh, xlate, env, logs, g, own, pkey)
+     vkcap = gfx == 'vulkan' and src['vk_capture'][0]   # SPIR-V shaders the game generates at run time, captured in the Mac host (capture_shaders)
+     glcap = gfx == 'gl' and src['gl_capture'][0]   # GLSL the game puts together at run time (LÖVE), captured in the Mac host (capture_shaders)
+@@ -1683,9 +1699,21 @@ def main(args=None):
+         report_profile_status(g, reg, pkg_ver, derived, provisional, 'Mac build')
+         return
  
 +    if args.target == 'mac':
 +        if gfx == 'gl': raise BuildError('macOS app packaging does not support the GL renderer')
@@ -73,7 +73,7 @@ index 637f529..85ae131 100755
      if prepare_xcode: ipa_env['DM_XCODE_PROJECT_DIR'] = str(project.parent)
      if app_version: ipa_env['DM_APP_VERSION'] = app_version
      # app icon: the game icon nx_extract saved from the control data (English, icon.jpg); the packed version's first, then the base game's
-@@ -1538,6 +1566,19 @@ def main(args=None):
+@@ -1715,6 +1743,19 @@ def main(args=None):
      run(['bash', repo / 'dm/ios/tools/build_ipa.sh', out_ipa], logs / 'build_ipa.log', env=ipa_env, on_line=watch.line)
      if not out_ipa.is_file(): raise BuildError(f'no IPA at {out_ipa}')
      PROG.end(f'{out_ipa.name}, {amount(out_ipa.stat().st_size, "B")}')

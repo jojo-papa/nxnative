@@ -3,16 +3,26 @@
 These patches keep fork behavior out of the upstream working tree. They are
 applied only to the staging tree created by `webui/staging.py`.
 
-- Upstream base: `eab15b5a7e339d172ba7cd6b1a298ec3cf1e16b6` (seedds/nxnative main, 2026-10-23)
-- Fork tree: `77dee3dab542d19a76e0cbb7175d3b6726ad275c` (the WebUI/fork commit copied into the sync branch)
-- Hooks commit: `18e488271dd3a0bbd17a7a5d2acadc6b1f648cf1`
+- Upstream base: `fa69e20a280413d56e64edcb8736bf9329957f77` (seedds/nxnative main, 2026-10-24)
+- Fork tree: `c586dd15b01e52cb7a31732163786ab4a54101b9` (the WebUI/fork commit copied into the sync branch)
+- Hooks commit: `7f222f206bac6664c4a9923a56cac8807751936b`
 - Patches were regenerated with
   `git diff --no-ext-diff --unified=3 upstream/main -- <target>` from the ported hooks branch.
-- `main` is the vendor drop of upstream `eab15b5`; `sync/upstream-20261023` keeps the same tree for reference. The pre-sync main (based on `233f18f`, commit `77dee3d`) is preserved on `backup/main-before-upstream-20261023`.
+- The 2026-10-24 sync starts at upstream `fa69e20`; `sync/upstream-20261024` holds the same tree. The pre-sync main (`c586dd1`) is preserved on `backup/main-before-upstream-20261024`.
 - `series` lists the patch file and its target. The applier rejects a target
   that differs from the series entry or escapes the tree.
 - Patch files are LF. The source checkout uses CRLF; `webui/diffapply.py`
   normalizes both sides and writes LF into the stage.
+
+## 2026-10-24 port notes
+
+Upstream's `gen_embed.py` now packs NRO modules through a `place()` helper; the
+fork's POSIX paths and `no_dead_strip` section attributes are applied to both
+the module and NRO section directives. The host Makefile line carries upstream's
+new headers (`pad_slots.h`, `hle_haptics.h`, `haptics_apple.h`, CoreHaptics) and
+no longer names the per-game `dmsh_chain.h`, while keeping `-framework MetalFX`.
+`scripts/build_ipa_from_nsp.py` keeps the `--target mac`, `--separate-romfs` and
+`@NXEVENT` hooks beside upstream's new `--platform` option.
 
 ## Patch 0009 notes
 
