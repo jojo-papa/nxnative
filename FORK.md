@@ -5,7 +5,8 @@ Upstream code lives at its original paths (`dm/`, `scripts/`, `docs/`, `README.m
 and is kept clean so that upstream can be fetched and merged without carrying fork
 changes in every file.
 
-All fork-owned code lives under `webui/`:
+Fork-owned code lives under `webui/`, with the root launchers and `FORK.md`
+beside it and the upstream-sync workflow under `.github/`:
 
 | Path | Purpose |
 |---|---|
@@ -17,6 +18,7 @@ All fork-owned code lives under `webui/`:
 | `webui/launchers/` | Canonical launchers (thin wrappers are at the repository root) |
 | `webui/tools/` | Staging, patch queue, sync checks and helper CLIs |
 | `webui/docs/` | WebUI guide, plan, validation data and upstream sync notes |
+| `.github/workflows/` | Fork-only GitHub Actions automation (upstream has no `.github`) |
 
 ## Start
 
@@ -46,13 +48,25 @@ the Windows builder and patches 0008/0009 carry the hooks. The app reads
 
 ## Upstream sync
 
-The upstream remote is `https://github.com/seedds/nxnative.git`. On 2026-10-23
-`main` was moved to a vendor drop of upstream `eab15b5`, with the fork tree
-copied in and the nine hook patches regenerated against that upstream. The
-pre-sync history is preserved on `backup/main-before-upstream-20261023`
-(commit `77dee3d`, based on `233f18f`). Do not merge upstream blindly: follow
-`webui/docs/sync.md`, port the hook patches onto the new upstream tree and
-refresh `webui/patches/`. `webui/tools/sync_check.py` reports upstream-owned
-edits and patch applicability.
+The upstream remote is `https://github.com/seedds/nxnative.git`. The recorded
+sync refs are in `webui/patches/UPSTREAM_BASE`; `webui/docs/sync.md` is the
+authoritative procedure.
+
+GitHub Actions runs `.github/workflows/upstream-sync.yml`:
+
+- the daily scheduled run uses `auto/upstream-sync` and fast-forwards `main`
+  only after the merge, strict hook port, patch regeneration, staging,
+  `sync_check` and tests pass;
+- a manual `workflow_dispatch` uses `review/upstream-sync` and opens a PR for a
+  human to merge; it never moves `main`;
+- `hooks/upstream-sync` is an internal audit branch;
+- any failure stops the run, keeps the evidence and opens/updates an Issue or
+  draft PR. There is no automatic vendor-drop fallback or conflict resolution.
+
+Push local `main` before enabling the workflow so the remote base is current.
+The workflow needs write permissions and, for review mode, permission to
+create pull requests; see `webui/docs/sync.md`. The local CLI is
+`webui/tools/sync_upstream.py`. `webui/tools/sync_check.py` reports
+upstream-owned edits and patch applicability.
 
 See `webui/README.md` for the developer overview.
