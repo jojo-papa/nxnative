@@ -4,22 +4,16 @@ Upstream: <https://github.com/seedds/nxnative>
 
 ## Current state
 
-| Ref | Commit |
-|---|---|
-| sync branch (fast-forwarded into `main`) | `sync/upstream-20261024-merge` |
-| pre-sync main (backup branch) | `c586dd15b01e52cb7a31732163786ab4a54101b9` on `backup/main-before-upstream-20261024` |
-| upstream main (2026-10-24) | `fa69e20a280413d56e64edcb8736bf9329957f77` |
-| ported hooks | `7f222f206bac6664c4a9923a56cac8807751936b` on `hooks/upstream-20261024` |
-| vendor-drop equivalent | `sync/upstream-20261024` (same tree) |
-| merge base | `eab15b5a7e339d172ba7cd6b1a298ec3cf1e16b6` |
+The authoritative base, upstream, fork, hooks and merge-base commits are in
+`webui/patches/UPSTREAM_BASE`; the automated sync updates it and the `series`
+comments. The 2026-10-24 sync merged upstream `fa69e20` into `main`; the
+vendor-drop equivalent is `sync/upstream-20261024`, the ported hooks are on
+`hooks/upstream-20261024`, and the pre-sync main is preserved on
+`backup/main-before-upstream-20261024`.
 
-The 2026-10-24 sync merges upstream `fa69e20` into `main`. Upstream-owned
-files are pristine except `dm/ios/project.yml`, so the merge is clean: the
-merge base is `eab15b5` and the fork tree (`webui/`, `FORK.md`, root launchers
-and `.gitattributes`) does not overlap upstream. The nine hook patches were
-ported onto `hooks/upstream-20261024` and regenerated; the vendor-drop
-equivalent `sync/upstream-20261024` has the same tree. The pre-sync main is
-kept on `backup/main-before-upstream-20261024`. Patches 0008/0009 carry the
+Upstream-owned files are pristine except `dm/ios/project.yml`, so a normal
+merge is clean: the fork tree (`webui/`, `FORK.md`, root launchers and
+`.gitattributes`) does not overlap upstream. Patches 0008/0009 carry the
 optional separate RomFS hooks (`NX_SEPARATE_ROMFS` / `--separate-romfs`); keep
 them when porting. `webui/provisional.py` mirrors upstream
 `scripts/build_ipa_from_nsp.py`'s survey and provisional-profile format for the
@@ -42,6 +36,93 @@ python webui/tools/init_fork.py --fetch
 This adds `upstream = https://github.com/seedds/nxnative.git` (never changes
 `origin`), fetches it, and writes `.webui-data/` to `.git/info/exclude`.
 Use `GIT_EXE=/path/to/git` if the shell's `git` shim is broken.
+
+## Automated sync
+
+`.github/workflows/upstream-sync.yml` runs on GitHub Actions. It has two modes:
+
+- `auto/upstream-sync`: every scheduled run (daily, 03:17 UTC). The workflow
+  builds a merge commit, ports the hook patches with the strict applier,
+  regenerates the patch queue, runs the checks, pushes the branch, and then
+  fast-forwards `origin/main`. `main` is never force-pushed.
+- `review/upstream-sync`: `workflow_dispatch` only, default mode `review`.
+  It does the same preparation and pushes the branch, but opens or updates a
+  PR for a human to merge. It never moves `main`.
+- `hooks/upstream-sync` is an internal audit branch holding the upstream tree
+  with the ported hooks; it makes the `hooks` commit in `UPSTREAM_BASE`
+  reachable. It is not a third sync mode.
+
+Scheduled runs always use `auto`. Run a manual dispatch from `main`; the job
+ignores a dispatch from any other branch. A manual dispatch defaults to
+`review` but can select `auto` or set `dry_run` to prepare and test without
+pushing. Use one mode at a time: an `auto` run that updates `main` can make an
+open `review` PR redundant. The workflow records `main` and upstream before running, and only
+publishes when:
+
+- the merge has exactly the expected parents;
+- `diffapply` applied all nine patches to the new upstream;
+- the regenerated patches are non-empty and the metadata was committed;
+- `patch_queue check`, staging verification, `sync_check` and the WebUI tests
+  all pass;
+- the tests did not modify tracked files;
+- the candidate does not change `.github/`, and the only `webui/` changes
+  are under `webui/patches/`.
+
+Upstream changes to fork-owned paths (`webui/`, `.github/`, `FORK.md`, the root
+launchers or `.gitattributes`) or to the directly edited `dm/ios/project.yml`
+stop the run before any merge and require a human. Any failure stops the sync.
+It leaves the branch/commit, logs and `.webui-data/upstream-sync/report`
+evidence, and creates or updates an Issue (`auto`) or a draft PR/Issue
+(`review`). There is no automatic vendor-drop fallback and no fuzzy or 3-way
+patch application.
+
+### GitHub setup
+
+The workflow needs repository settings that code cannot change:
+
+- Actions allowed to run; enable the workflow in the Actions tab on first use.
+- **Settings → Actions → General → Workflow permissions**: read and write.
+- Enable **Allow GitHub Actions to create and approve pull requests** for
+  `review` mode.
+- If `main` is protected, allow the GitHub Actions app to push it (or use a
+  ruleset bypass). Required PR reviews, required status checks or linear-history
+  rules block the `auto` fast-forward. Without a bypass, use `review` mode.
+- Do not protect `auto/upstream-sync`, `review/upstream-sync` or
+  `hooks/upstream-sync` against force pushes; the workflow updates automation
+  branches with `--force-with-lease`. Do not commit to these branches by hand;
+  the next run replaces their history.
+- The workflow uses only `GITHUB_TOKEN`; no PAT or secret is required. Its
+  tests run before the token is given to any push/PR/Issue step, and checkout
+  credentials are not persisted.
+- GitHub may disable scheduled workflows after long repository inactivity;
+  re-enable the workflow if the Actions page reports that.
+
+The first run must be based on a current `origin/main`; push local `main` first.
+A scheduled run with no upstream change is a successful no-op. The automation
+runs structural, staging and unit checks only, not a real Windows/macOS build
+or a game; use `review` mode and a full build when that validation is needed.
+
+### Local use
+
+The same CLI can prepare a branch locally without touching the workflow:
+
+```sh
+python webui/tools/sync_upstream.py --mode review --fetch
+python webui/tools/sync_upstream.py --mode review --dry-run --fetch --json
+python webui/tools/sync_upstream.py --mode review --fetch --push
+```
+
+`--push` pushes only the `review/upstream-sync` and internal
+`hooks/upstream-sync` branches; it never pushes `main`. Runs require a clean
+working tree. On failure the worktrees stay under `.webui-data/auto-*` and the
+report is in `.webui-data/upstream-sync/report/`. A failed sync must be
+repaired by hand (merge conflicts or patch context) and rerun; do not bypass
+`diffapply`.
+
+## Manual fallback
+
+Use the procedure below when the automated port stops on a patch conflict or
+when a change needs review before it reaches `main`.
 
 ## Recommended sync: merge upstream/main
 

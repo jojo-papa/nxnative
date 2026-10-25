@@ -6,3 +6,4 @@ webui/**/*.ps1 text eol=crlf
 start-webui.sh text eol=lf
 start-webui.command text eol=lf
 start-webui.bat text eol=crlf
+.github/workflows/*.yml text eol=lf

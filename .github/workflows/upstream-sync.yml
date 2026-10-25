@@ -1,0 +1,292 @@
+name: Upstream sync
+
+on:
+  schedule:
+    - cron: '17 3 * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'auto fast-forwards main after checks; review only opens a PR'
+        type: choice
+        options: [review, auto]
+        default: review
+      dry_run:
+        description: 'Prepare and run checks without pushing branches or main'
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      MODE: ${{ github.event_name == 'schedule' && 'auto' || inputs.mode }}
+      DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry_run && 'true' || 'false' }}
+      PYTHONUTF8: '1'
+      GIT_EXE: git
+
+    steps:
+      - name: Check out main
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.13'
+          cache: pip
+          cache-dependency-path: webui/requirements-sync-ci.txt
+
+      - name: Install sync test dependencies
+        run: python -m pip install -r webui/requirements-sync-ci.txt
+
+      - name: Configure git identity
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+
+      - name: Fetch upstream and record refs
+        id: refs
+        shell: bash
+        run: |
+          python webui/tools/init_fork.py --fetch
+          git fetch origin --prune
+          base="$(git rev-parse HEAD)"
+          upstream="$(git rev-parse upstream/main)"
+          printf 'base=%s\nupstream=%s\n' "$base" "$upstream" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare the sync branch
+        id: sync
+        shell: bash
+        run: python webui/tools/sync_upstream.py --mode "$MODE" --json
+
+      - name: Read sync result
+        id: result
+        if: always()
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, os
+          path = '.webui-data/upstream-sync/report/result.json'
+          try:
+              with open(path, encoding='utf-8') as stream:
+                  value = json.load(stream)
+          except (OSError, ValueError):
+              value = {}
+          pairs = {
+              'changed': str(bool(value.get('changed', False))).lower(),
+              'ok': str(bool(value.get('ok', False))).lower(),
+              'sha': value.get('sha') or '',
+              'hooks_sha': value.get('hooks_sha') or '',
+              'stage': value.get('stage') or 'missing-result',
+          }
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as stream:
+              for key, item in pairs.items():
+                  stream.write(f'{key}={item}\n')
+          PY
+
+      - name: Upload sync evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: upstream-sync-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .webui-data/upstream-sync/report
+          if-no-files-found: ignore
+          include-hidden-files: true
+          retention-days: 30
+
+      - name: Validate the prepared commit
+        id: candidate
+        if: always() && steps.result.outputs.changed == 'true' && steps.result.outputs.sha != ''
+        shell: bash
+        env:
+          BASE_SHA: ${{ steps.refs.outputs.base }}
+          UPSTREAM_SHA: ${{ steps.refs.outputs.upstream }}
+          SYNC_SHA: ${{ steps.result.outputs.sha }}
+          HOOKS_SHA: ${{ steps.result.outputs.hooks_sha }}
+        run: |
+          set -euo pipefail
+          test -n "$SYNC_SHA"
+          git cat-file -e "${SYNC_SHA}^{commit}"
+          git merge-base --is-ancestor "$BASE_SHA" "$SYNC_SHA"
+          git merge-base --is-ancestor "$UPSTREAM_SHA" "$SYNC_SHA"
+          if [ -n "$HOOKS_SHA" ]; then
+              git cat-file -e "${HOOKS_SHA}^{commit}"
+              test "$(git rev-parse "${HOOKS_SHA}^")" = "$UPSTREAM_SHA"
+          fi
+          test -z "$(git diff --name-only "$BASE_SHA..$SYNC_SHA" -- .github .gitattributes FORK.md start-webui.sh start-webui.command start-webui.bat)"
+          test -z "$(git diff --name-only "$BASE_SHA..$SYNC_SHA" -- webui | grep -v '^webui/patches/' || true)"
+          echo 'VALID=true' >> "$GITHUB_OUTPUT"
+
+      - name: Push automation branches
+        id: push
+        if: always() && env.DRY_RUN != 'true' && steps.candidate.outputs.VALID == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SYNC_SHA: ${{ steps.result.outputs.sha }}
+          HOOKS_SHA: ${{ steps.result.outputs.hooks_sha }}
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$GH_TOKEN"
+          case "$MODE" in auto|review) ;; *) echo "invalid mode: $MODE" >&2; exit 1 ;; esac
+          branch="${MODE}/upstream-sync"
+          url="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          push_ref() {
+              local name="$1" sha="$2"
+              test -n "$sha" || return 0
+              if git fetch "$url" "refs/heads/${name}:refs/remotes/origin/${name}" 2>/dev/null; then
+                  local expected
+                  expected="$(git rev-parse "refs/remotes/origin/${name}")"
+                  git push --force-with-lease="refs/heads/${name}:${expected}" "$url" "${sha}:refs/heads/${name}"
+              else
+                  git push "$url" "${sha}:refs/heads/${name}"
+              fi
+          }
+          push_ref "$branch" "$SYNC_SHA"
+          push_ref 'hooks/upstream-sync' "$HOOKS_SHA"
+          echo 'PUSHED=true' >> "$GITHUB_OUTPUT"
+
+      - name: Fast-forward main
+        id: promote
+        if: always() && env.DRY_RUN != 'true' && env.MODE == 'auto' && steps.sync.outcome == 'success' && steps.result.outputs.ok == 'true' && steps.result.outputs.changed == 'true' && steps.candidate.outputs.VALID == 'true' && steps.push.outputs.PUSHED == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE_SHA: ${{ steps.refs.outputs.base }}
+          SYNC_SHA: ${{ steps.result.outputs.sha }}
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$GH_TOKEN"
+          url="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git fetch "$url" 'refs/heads/main:refs/remotes/origin/main'
+          test "$(git rev-parse refs/remotes/origin/main)" = "$BASE_SHA"
+          git merge-base --is-ancestor "$BASE_SHA" "$SYNC_SHA"
+          git push "$url" "${SYNC_SHA}:refs/heads/main"
+          echo 'PROMOTED=true' >> "$GITHUB_OUTPUT"
+
+      - name: Report auto failure
+        if: always() && env.DRY_RUN != 'true' && env.MODE == 'auto' && (steps.sync.outcome != 'success' || steps.result.outputs.ok != 'true' || steps.result.outputs.changed == 'true' && steps.promote.outputs.PROMOTED != 'true')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$GH_TOKEN"
+          body="$RUNNER_TEMP/auto-failure.md"
+          {
+              echo 'Automatic upstream sync did not reach main.'
+              echo
+              echo "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+              echo "Stage: ${{ steps.result.outputs.stage }}"
+              echo "Upstream: ${{ steps.refs.outputs.upstream }}"
+              echo "Branch: auto/upstream-sync"
+              echo
+              cat .webui-data/upstream-sync/report/summary.md 2>/dev/null || true
+          } > "$body"
+          number="$(gh issue list --state open --search '"Upstream sync auto blocked" in:title' --json number --jq '.[0].number // empty')"
+          if [ -n "$number" ]; then
+              gh issue comment "$number" --body-file "$body"
+          else
+              gh issue create --title 'Upstream sync auto blocked' --body-file "$body"
+          fi
+
+      - name: Close recovered auto issue
+        if: always() && env.MODE == 'auto' && steps.sync.outcome == 'success' && steps.result.outputs.ok == 'true' && steps.result.outputs.changed == 'true' && steps.promote.outputs.PROMOTED == 'true'
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$GH_TOKEN"
+          number="$(gh issue list --state open --search '"Upstream sync auto blocked" in:title' --json number --jq '.[0].number // empty')"
+          if [ -n "$number" ]; then
+              gh issue close "$number" --comment "Recovered by $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+          fi
+
+      - name: Open or update review PR
+        id: pr
+        if: always() && env.DRY_RUN != 'true' && env.MODE == 'review' && steps.result.outputs.changed == 'true' && steps.candidate.outputs.VALID == 'true' && steps.push.outputs.PUSHED == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$GH_TOKEN"
+          upstream="${{ steps.refs.outputs.upstream }}"
+          body="$RUNNER_TEMP/review-sync.md"
+          {
+              echo "Upstream: \`$upstream\`"
+              echo "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+              echo
+              cat .webui-data/upstream-sync/report/summary.md 2>/dev/null || true
+          } > "$body"
+          title="Upstream sync ${upstream:0:12}"
+          number="$(gh pr list --state open --head review/upstream-sync --json number --jq '.[0].number // empty')"
+          if [ -n "$number" ]; then
+              gh pr edit "$number" --title "$title" --body-file "$body"
+              if [ "${{ steps.result.outputs.ok }}" = 'true' ]; then
+                  gh pr ready "$number"
+              else
+                  gh pr ready --undo "$number" || true
+              fi
+          elif [ "${{ steps.result.outputs.ok }}" = 'true' ]; then
+              gh pr create --base main --head review/upstream-sync --title "$title" --body-file "$body"
+          else
+              gh pr create --draft --base main --head review/upstream-sync --title "$title" --body-file "$body"
+          fi
+
+      - name: Report review failure without a branch
+        if: always() && env.DRY_RUN != 'true' && env.MODE == 'review' && (steps.result.outputs.changed == 'true' && (steps.candidate.outputs.VALID != 'true' || steps.push.outputs.PUSHED != 'true' || steps.pr.outcome != 'success') || steps.result.outputs.changed != 'true' && steps.result.outputs.ok != 'true')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          echo "::add-mask::$GH_TOKEN"
+          body="$RUNNER_TEMP/review-failure.md"
+          {
+              echo 'The manual upstream review sync did not produce a usable review PR.'
+              echo
+              echo "Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+              echo "Stage: ${{ steps.result.outputs.stage }}"
+              echo "Upstream: ${{ steps.refs.outputs.upstream }}"
+              echo
+              cat .webui-data/upstream-sync/report/summary.md 2>/dev/null || true
+          } > "$body"
+          number="$(gh issue list --state open --search '"Upstream sync review blocked" in:title' --json number --jq '.[0].number // empty')"
+          if [ -n "$number" ]; then
+              gh issue comment "$number" --body-file "$body"
+          else
+              gh issue create --title 'Upstream sync review blocked' --body-file "$body"
+          fi
+
+      - name: Summarize
+        if: always()
+        shell: bash
+        run: |
+          {
+              echo '## Upstream sync'
+              echo
+              echo "- Mode: \`$MODE\`"
+              echo "- Stage: \`${{ steps.result.outputs.stage }}\`"
+              echo "- Upstream: \`${{ steps.refs.outputs.upstream }}\`"
+              echo "- Sync commit: \`${{ steps.result.outputs.sha }}\`"
+              echo "- Branch pushed: \`${{ steps.push.outputs.PUSHED }}\`"
+              echo "- Main promoted: \`${{ steps.promote.outputs.PROMOTED }}\`"
+              echo "- Artifact: \`upstream-sync-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT\`"
+          } >> "$GITHUB_STEP_SUMMARY"

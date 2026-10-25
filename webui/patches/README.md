@@ -3,12 +3,16 @@
 These patches keep fork behavior out of the upstream working tree. They are
 applied only to the staging tree created by `webui/staging.py`.
 
-- Upstream base: `fa69e20a280413d56e64edcb8736bf9329957f77` (seedds/nxnative main, 2026-10-24)
-- Fork tree: `c586dd15b01e52cb7a31732163786ab4a54101b9` (the WebUI/fork commit copied into the sync branch)
-- Hooks commit: `7f222f206bac6664c4a9923a56cac8807751936b`
-- Patches were regenerated with
+- The current base, upstream, fork, hooks and merge-base commits are recorded in
+  `UPSTREAM_BASE`; `webui/tools/sync_upstream.py` updates that file and the
+  `series` comments when it regenerates the queue.
+- Patches are regenerated with
   `git diff --no-ext-diff --unified=3 upstream/main -- <target>` from the ported hooks branch.
-- The 2026-10-24 sync merges upstream `fa69e20` into `main`; `sync/upstream-20261024` is the vendor-drop equivalent with the same tree. The pre-sync main (`c586dd1`) is preserved on `backup/main-before-upstream-20261024`.
+- The 2026-10-24 sync merged upstream `fa69e20` into `main`;
+  `sync/upstream-20261024` is the vendor-drop equivalent with the same tree.
+  The pre-sync main (`c586dd1`) is preserved on
+  `backup/main-before-upstream-20261024`. `webui/docs/sync.md` records the
+  automation and manual fallback procedures.
 - `series` lists the patch file and its target. The applier rejects a target
   that differs from the series entry or escapes the tree.
 - Patch files are LF. The source checkout uses CRLF; `webui/diffapply.py`
