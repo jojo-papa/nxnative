@@ -15,8 +15,8 @@ MARKERS = {
     '0007-main-launch-settings.patch': ['DmLaunchSettings.h'],
     '0008-build-ipa-launch-defaults.patch': ['NX_LAUNCH_DEFAULTS', 'NX_SEPARATE_ROMFS'],
     '0009-build-ipa-from-nsp-webui.patch': ['@NXEVENT', 'webui/build/macos/pack_app.py',
-                                            'hashlib, json, os', '--separate-romfs',
-                                            'NX_SEPARATE_ROMFS', 'RomFS archive'],
+                                            '--separate-romfs', 'NX_SEPARATE_ROMFS',
+                                            'RomFS archive'],
 }
 
 
