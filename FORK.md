@@ -18,7 +18,7 @@ beside it and the upstream-sync workflow under `.github/`:
 | `webui/launchers/` | Canonical launchers (thin wrappers are at the repository root) |
 | `webui/tools/` | Staging, patch queue, sync checks and helper CLIs |
 | `webui/docs/` | WebUI guide, plan, validation data and upstream sync notes |
-| `.github/workflows/` | Fork-only GitHub Actions automation (upstream has no `.github`) |
+| `.github/workflows/upstream-sync.yml` | Fork-only upstream-sync automation; other `.github` files are upstream-owned |
 
 ## Start
 
@@ -55,8 +55,8 @@ authoritative procedure.
 GitHub Actions runs `.github/workflows/upstream-sync.yml`:
 
 - the daily scheduled run uses `auto/upstream-sync` and fast-forwards `main`
-  only after the merge, strict hook port, patch regeneration, staging,
-  `sync_check` and tests pass;
+  only after the merge, hook port, patch regeneration, staging, `sync_check`
+  and tests pass;
 - a manual `workflow_dispatch` uses `review/upstream-sync` and opens a PR for a
   human to merge; it never moves `main`;
 - `hooks/upstream-sync` is an internal audit branch;

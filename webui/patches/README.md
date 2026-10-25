@@ -8,6 +8,9 @@ applied only to the staging tree created by `webui/staging.py`.
   `series` comments when it regenerates the queue.
 - Patches are regenerated with
   `git diff --no-ext-diff --unified=3 upstream/main -- <target>` from the ported hooks branch.
+  The sync CLI ports the previous queue with `git apply` (exact context, line
+  offsets allowed), then requires the regenerated queue to pass the strict
+  `diffapply`/staging checks.
 - The 2026-10-24 sync merged upstream `fa69e20` into `main`;
   `sync/upstream-20261024` is the vendor-drop equivalent with the same tree.
   The pre-sync main (`c586dd1`) is preserved on

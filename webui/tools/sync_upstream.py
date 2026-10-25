@@ -25,7 +25,7 @@ from webui.repo import REPO, UPSTREAM_URL, ensure_git_exclude
 
 BRANCHES = {'auto': 'auto/upstream-sync', 'review': 'review/upstream-sync'}
 HOOKS_BRANCH = 'hooks/upstream-sync'
-FORK_OWNED = ('.github/', 'webui/', 'FORK.md', '.gitattributes',
+FORK_OWNED = ('.github/workflows/upstream-sync.yml', 'webui/', 'FORK.md', '.gitattributes',
               'start-webui.sh', 'start-webui.command', 'start-webui.bat')
 MANUAL_REVIEW = ('dm/ios/project.yml',)
 SENSITIVE = set(staging.OVERLAY_TARGETS) | {target for _, target in staging.patch_queue()} | {
@@ -262,8 +262,12 @@ class Syncer:
     def port_hooks(self):
         self._remove_worktree(self.hooks_tree)
         self.git('worktree', 'add', '--detach', str(self.hooks_tree), self.upstream_ref)
-        self.tool('patch_apply', [self.sync_tree / 'webui/tools/patch_queue.py', 'apply', self.hooks_tree],
-                  cwd=self.sync_tree)
+        patches = [patch for patch, _target in staging.patch_queue()]
+        try:
+            self.git('apply', '--check', '--whitespace=nowarn', *patches, cwd=self.hooks_tree)
+            self.git('apply', '--whitespace=nowarn', *patches, cwd=self.hooks_tree)
+        except SyncError as error:
+            raise SyncError('patch_apply failed: ' + str(error), stage='patch_apply', code=2) from error
         targets = [target for _, target in staging.patch_queue()]
         self.git('add', '--', *targets, cwd=self.hooks_tree)
         staged = self.git('diff', '--cached', '--quiet', cwd=self.hooks_tree, check=False)

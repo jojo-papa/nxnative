@@ -127,7 +127,7 @@ jobs:
               git cat-file -e "${HOOKS_SHA}^{commit}"
               test "$(git rev-parse "${HOOKS_SHA}^")" = "$UPSTREAM_SHA"
           fi
-          test -z "$(git diff --name-only "$BASE_SHA..$SYNC_SHA" -- .github .gitattributes FORK.md start-webui.sh start-webui.command start-webui.bat)"
+          test -z "$(git diff --name-only "$BASE_SHA..$SYNC_SHA" -- .github/workflows/upstream-sync.yml .gitattributes FORK.md start-webui.sh start-webui.command start-webui.bat)"
           test -z "$(git diff --name-only "$BASE_SHA..$SYNC_SHA" -- webui | grep -v '^webui/patches/' || true)"
           echo 'VALID=true' >> "$GITHUB_OUTPUT"
 
