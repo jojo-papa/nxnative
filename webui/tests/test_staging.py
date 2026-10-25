@@ -25,6 +25,15 @@ def digest(path):
 
 
 class StagingTests(unittest.TestCase):
+    def test_linked_worktree_git_file_is_not_copied(self):
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            (root / '.git').write_text('gitdir: /tmp/worktree\n', encoding='utf-8')
+            (root / 'file.txt').write_text('x', encoding='utf-8')
+            files = {path.relative_to(root).as_posix() for path in staging.iter_files(root)}
+            self.assertNotIn('.git', files)
+            self.assertIn('file.txt', files)
+
     def test_stage_is_isolated_and_reused(self):
         before = {target: digest(REPO / target) for target in TARGETS}
         with tempfile.TemporaryDirectory() as folder:

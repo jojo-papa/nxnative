@@ -56,7 +56,7 @@ def _skipped_dir(rel: str, name: str) -> bool:
 
 
 def _skipped_file(rel: str, name: str) -> bool:
-    if name.endswith('.pyc') or rel in SKIP_FILES:
+    if name.endswith('.pyc') or name == '.git' or rel in SKIP_FILES:
         return True
     return any(rel.startswith(prefix + '/') for prefix in SKIP_REL_PREFIXES)
 

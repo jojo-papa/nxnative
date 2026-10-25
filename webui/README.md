@@ -17,7 +17,7 @@ its original paths; everything here is safe to change without touching upstream.
 - `overlays/dm/`: fork-only source files copied into the staged `dm/` tree.
 - `patches/`: ordered upstream hook patches (`series`).
 - `launchers/`: canonical Python/PowerShell/shell launchers.
-- `tools/`: staging CLI, patch queue, sync check, tool preparation and XCI helper.
+- `tools/`: staging CLI, patch queue, sync check, upstream sync CLI, tool preparation and XCI helper.
 - `tests/`: unittest suite (`python -m unittest discover -s webui/tests -t . -v`).
 
 ## Build flow

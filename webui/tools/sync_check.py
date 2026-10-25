@@ -43,9 +43,10 @@ def git_out(*args):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--base', default='233f18f421344fcd3b61559459ef8649d6c38a54',
+    parser.add_argument('--base', default='upstream/main',
                         help='upstream base used for the working-tree cleanliness check')
     parser.add_argument('--ref', default='upstream/main', help='upstream ref for patch applicability')
+    parser.add_argument('--worktree', type=Path, help='temporary worktree path (default: .webui-data/sync-check)')
     parser.add_argument('--offline', action='store_true', help='do not inspect the upstream ref')
     parser.add_argument('--json', action='store_true')
     args = parser.parse_args(argv)
@@ -95,13 +96,18 @@ def main(argv=None):
         findings.append({'kind': 'patch', 'detail': str(error)})
 
     if not args.offline:
-        worktree = REPO / '.webui-data' / 'sync-check'
-        if worktree.exists():
-            shutil.rmtree(worktree, ignore_errors=True)
-        created = git_out('worktree', 'add', '--detach', str(worktree), args.ref)
-        if created.returncode:
-            findings.append({'kind': 'upstream-ref', 'detail': created.stderr.strip()})
+        worktree = (args.worktree or (REPO / '.webui-data' / 'sync-check')).expanduser().resolve()
+        if worktree == REPO.resolve():
+            findings.append({'kind': 'worktree', 'detail': 'refusing to use the repository root as a temporary worktree'})
         else:
+            git_out('worktree', 'remove', '--force', str(worktree))
+            git_out('worktree', 'prune')
+            if worktree.exists():
+                shutil.rmtree(worktree, ignore_errors=True)
+        created = git_out('worktree', 'add', '--detach', str(worktree), args.ref) if worktree != REPO.resolve() else None
+        if created is not None and created.returncode:
+            findings.append({'kind': 'upstream-ref', 'detail': created.stderr.strip()})
+        elif created is not None:
             try:
                 for patch, target in staging.patch_queue():
                     result = subprocess.run([git(), '-C', str(worktree), 'apply', '--check', '--whitespace=nowarn',
@@ -110,6 +116,7 @@ def main(argv=None):
                         findings.append({'kind': 'patch-upstream', 'detail': f'{patch.name}: {result.stderr.strip()}'})
             finally:
                 git_out('worktree', 'remove', '--force', str(worktree))
+                git_out('worktree', 'prune')
 
     report = {'ok': not findings, 'findings': findings}
     print(json.dumps(report, indent=2) if args.json else
