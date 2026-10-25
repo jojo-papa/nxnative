@@ -42,9 +42,11 @@ Use `GIT_EXE=/path/to/git` if the shell's `git` shim is broken.
 `.github/workflows/upstream-sync.yml` runs on GitHub Actions. It has two modes:
 
 - `auto/upstream-sync`: every scheduled run (daily, 03:17 UTC). The workflow
-  builds a merge commit, ports the hook patches with the strict applier,
-  regenerates the patch queue, runs the checks, pushes the branch, and then
-  fast-forwards `origin/main`. `main` is never force-pushed.
+  builds a merge commit, applies the existing hook queue with `git apply`
+  (exact context, line offsets allowed, no fuzz), regenerates the queue and
+  re-verifies it with the strict `diffapply`/staging checks, runs the tests,
+  pushes the branch, and then fast-forwards `origin/main`. `main` is never
+  force-pushed.
 - `review/upstream-sync`: `workflow_dispatch` only, default mode `review`.
   It does the same preparation and pushes the branch, but opens or updates a
   PR for a human to merge. It never moves `main`.
@@ -60,21 +62,25 @@ open `review` PR redundant. The workflow records `main` and upstream before runn
 publishes when:
 
 - the merge has exactly the expected parents;
-- `diffapply` applied all nine patches to the new upstream;
-- the regenerated patches are non-empty and the metadata was committed;
+- the existing nine patches applied to the new upstream with `git apply`
+  (exact context, offsets allowed);
+- the regenerated patches are non-empty, pass the strict `diffapply`/staging
+  checks and the metadata was committed;
 - `patch_queue check`, staging verification, `sync_check` and the WebUI tests
   all pass;
 - the tests did not modify tracked files;
-- the candidate does not change `.github/`, and the only `webui/` changes
-  are under `webui/patches/`.
+- the candidate does not change `.github/workflows/upstream-sync.yml` or the
+  root fork launchers, and the only `webui/` changes are under
+  `webui/patches/`.
 
-Upstream changes to fork-owned paths (`webui/`, `.github/`, `FORK.md`, the root
-launchers or `.gitattributes`) or to the directly edited `dm/ios/project.yml`
-stop the run before any merge and require a human. Any failure stops the sync.
-It leaves the branch/commit, logs and `.webui-data/upstream-sync/report`
-evidence, and creates or updates an Issue (`auto`) or a draft PR/Issue
-(`review`). There is no automatic vendor-drop fallback and no fuzzy or 3-way
-patch application.
+Upstream changes to fork-owned paths (`webui/`, the fork-owned
+`.github/workflows/upstream-sync.yml`, `FORK.md`, the root launchers or
+`.gitattributes`) or to the directly edited `dm/ios/project.yml` stop the run
+before any merge and require a human. Other upstream `.github` files, such as
+its own test workflows, merge normally. Any failure stops the sync. It leaves
+the branch/commit, logs and `.webui-data/upstream-sync/report` evidence, and
+creates or updates an Issue (`auto`) or a draft PR/Issue (`review`). There is no
+automatic vendor-drop fallback and no fuzzy or 3-way patch application.
 
 ### GitHub setup
 
