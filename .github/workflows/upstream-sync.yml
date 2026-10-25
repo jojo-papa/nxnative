@@ -129,6 +129,11 @@ jobs:
           fi
           test -z "$(git diff --name-only "$BASE_SHA..$SYNC_SHA" -- .github/workflows/upstream-sync.yml .gitattributes FORK.md start-webui.sh start-webui.command start-webui.bat)"
           test -z "$(git diff --name-only "$BASE_SHA..$SYNC_SHA" -- webui | grep -v '^webui/patches/' || true)"
+          if [ -n "$(git diff --name-only "$BASE_SHA..$SYNC_SHA" -- .github/workflows | grep -v '^\.github/workflows/upstream-sync.yml$' || true)" ]; then
+              echo 'WORKFLOW_CHANGES=true' >> "$GITHUB_OUTPUT"
+          else
+              echo 'WORKFLOW_CHANGES=false' >> "$GITHUB_OUTPUT"
+          fi
           echo 'VALID=true' >> "$GITHUB_OUTPUT"
 
       - name: Push automation branches
@@ -136,12 +141,17 @@ jobs:
         if: always() && env.DRY_RUN != 'true' && steps.candidate.outputs.VALID == 'true'
         shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.SYNC_TOKEN || github.token }}
+          SYNC_TOKEN: ${{ secrets.SYNC_TOKEN }}
           SYNC_SHA: ${{ steps.result.outputs.sha }}
           HOOKS_SHA: ${{ steps.result.outputs.hooks_sha }}
         run: |
           set -euo pipefail
           echo "::add-mask::$GH_TOKEN"
+          if [ "${{ steps.candidate.outputs.WORKFLOW_CHANGES }}" = 'true' ] && [ -z "${SYNC_TOKEN:-}" ]; then
+              echo '::error::Upstream changes workflow files. Add the SYNC_TOKEN secret with Contents and Workflows write permission.'
+              exit 1
+          fi
           case "$MODE" in auto|review) ;; *) echo "invalid mode: $MODE" >&2; exit 1 ;; esac
           branch="${MODE}/upstream-sync"
           url="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
@@ -165,7 +175,7 @@ jobs:
         if: always() && env.DRY_RUN != 'true' && env.MODE == 'auto' && steps.sync.outcome == 'success' && steps.result.outputs.ok == 'true' && steps.result.outputs.changed == 'true' && steps.candidate.outputs.VALID == 'true' && steps.push.outputs.PUSHED == 'true'
         shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.SYNC_TOKEN || github.token }}
           BASE_SHA: ${{ steps.refs.outputs.base }}
           SYNC_SHA: ${{ steps.result.outputs.sha }}
         run: |
@@ -182,7 +192,7 @@ jobs:
         if: always() && env.DRY_RUN != 'true' && env.MODE == 'auto' && (steps.sync.outcome != 'success' || steps.result.outputs.ok != 'true' || steps.result.outputs.changed == 'true' && steps.promote.outputs.PROMOTED != 'true')
         shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.SYNC_TOKEN || github.token }}
         run: |
           set -euo pipefail
           echo "::add-mask::$GH_TOKEN"
@@ -209,7 +219,7 @@ jobs:
         continue-on-error: true
         shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.SYNC_TOKEN || github.token }}
         run: |
           set -euo pipefail
           echo "::add-mask::$GH_TOKEN"
@@ -223,7 +233,7 @@ jobs:
         if: always() && env.DRY_RUN != 'true' && env.MODE == 'review' && steps.result.outputs.changed == 'true' && steps.candidate.outputs.VALID == 'true' && steps.push.outputs.PUSHED == 'true'
         shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.SYNC_TOKEN || github.token }}
         run: |
           set -euo pipefail
           echo "::add-mask::$GH_TOKEN"
@@ -254,7 +264,7 @@ jobs:
         if: always() && env.DRY_RUN != 'true' && env.MODE == 'review' && (steps.result.outputs.changed == 'true' && (steps.candidate.outputs.VALID != 'true' || steps.push.outputs.PUSHED != 'true' || steps.pr.outcome != 'success') || steps.result.outputs.changed != 'true' && steps.result.outputs.ok != 'true')
         shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ secrets.SYNC_TOKEN || github.token }}
         run: |
           set -euo pipefail
           echo "::add-mask::$GH_TOKEN"

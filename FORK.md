@@ -65,7 +65,9 @@ GitHub Actions runs `.github/workflows/upstream-sync.yml`:
 
 Push local `main` before enabling the workflow so the remote base is current.
 The workflow needs write permissions and, for review mode, permission to
-create pull requests; see `webui/docs/sync.md`. The local CLI is
+create pull requests; upstream workflow-file changes also need the
+`SYNC_TOKEN` Actions secret (a PAT with Contents, Workflows, Issues and Pull
+requests write). See `webui/docs/sync.md`. The local CLI is
 `webui/tools/sync_upstream.py`. `webui/tools/sync_check.py` reports
 upstream-owned edits and patch applicability.
 

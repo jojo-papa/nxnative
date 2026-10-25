@@ -149,6 +149,8 @@ class WorkflowTests(unittest.TestCase):
         self.assertIn('DRY_RUN', self.text)
         self.assertIn('--mode "$MODE"', self.text)
         self.assertIn('webui/requirements-sync-ci.txt', self.text)
+        self.assertIn('secrets.SYNC_TOKEN', self.text)
+        self.assertIn('WORKFLOW_CHANGES', self.text)
 
     def test_actions_are_pinned_to_commits(self):
         uses = re.findall(r'uses:\s+([^\s#]+)', self.text)
