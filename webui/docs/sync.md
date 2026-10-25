@@ -97,9 +97,17 @@ The workflow needs repository settings that code cannot change:
   `hooks/upstream-sync` against force pushes; the workflow updates automation
   branches with `--force-with-lease`. Do not commit to these branches by hand;
   the next run replaces their history.
-- The workflow uses only `GITHUB_TOKEN`; no PAT or secret is required. Its
-  tests run before the token is given to any push/PR/Issue step, and checkout
-  credentials are not persisted.
+- Add an Actions secret named `SYNC_TOKEN` before syncing an upstream change
+  that touches `.github/workflows/`. GitHub's `GITHUB_TOKEN` is not allowed to
+  create or update workflow files. Use a fine-grained PAT limited to this
+  repository with **Contents: Read and write**, **Workflows: Read and write**,
+  **Issues: Read and write** and **Pull requests: Read and write** (a classic
+  PAT with `repo` and `workflow` also works). The secret is referenced only by
+  the push, PR and Issue steps, never by the tests; checkout credentials are
+  not persisted. Without it, syncs that do not change workflow files still use
+  `GITHUB_TOKEN`, but a workflow change fails with a clear message.
+- The workflow otherwise uses only `GITHUB_TOKEN`; no other secret is required.
+  Its tests run before the token is given to any push/PR/Issue step.
 - GitHub may disable scheduled workflows after long repository inactivity;
   re-enable the workflow if the Actions page reports that.
 
