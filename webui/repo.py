@@ -6,7 +6,12 @@ REPO = Path(__file__).resolve().parents[1]
 UPSTREAM_URL = 'https://github.com/seedds/nxnative.git'
 DOCS_URL = 'https://github.com/xbunax/nxnative/blob/main/webui/docs/webui.md'
 
-DATA_EXCLUDES = ('.webui-data/',)
+# Local git excludes.  The upstream .gitignore is an upstream-owned file, so
+# the fork's own build products are excluded here instead of by editing it.
+# out/ holds the packaged IPAs, the screenshots and the research notes: it is
+# output, not source, and it must never reach the repository or a stage tree
+# (rule R-16).
+DATA_EXCLUDES = ('.webui-data/', 'out/')
 
 
 def load_game_module():

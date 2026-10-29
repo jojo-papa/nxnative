@@ -57,6 +57,20 @@ class StagingTests(unittest.TestCase):
             for target, value in before.items():
                 self.assertEqual(value, digest(REPO / target), target)
 
+    def test_stage_tree_excludes_build_outputs(self):
+        """out/ holds packaged IPAs; staging it would copy tens of gigabytes.
+
+        This is what filled the disk once: every stage tree copied the whole
+        out/ directory, so a build failed with 'disk full'.  Rule R-16.
+        """
+        with tempfile.TemporaryDirectory() as folder:
+            root = Path(folder)
+            tree = staging.ensure(REPO, root, force=True)
+            self.assertFalse((tree / 'out').exists(), 'out/ must not be staged')
+            size = sum(path.stat().st_size for path in tree.rglob('*') if path.is_file())
+            self.assertLess(size, 512 * 1024 * 1024,
+                            'the stage tree must stay a source tree, not a copy of the build products')
+
 
 if __name__ == '__main__':
     unittest.main()

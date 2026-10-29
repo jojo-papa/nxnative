@@ -1,0 +1,63 @@
+patch	kind	feature	needs	reason
+0001-shader-split-posix-paths.patch	base	toolchain.windows	-	Windows 上的路径要用 POSIX 分隔符
+0002-gen-embed-posix-paths-sections.patch	base	toolchain.windows	-	生成的内嵌段用 POSIX 路径
+0003-hle-count-targetconditionals.patch	base	-	-	条件编译在别的 SDK 上不成立
+0004-nx-extract-catalog.patch	base	-	-	解包工具要支持整包目录
+0005-host-makefile-metalfx.patch	base	-	-	宿主要链 MetalFX 才能用空间放大（它是 0006 的前置，不是它的一部分）
+0006-nvn-mtl-spatial-upscaling.patch	custom	metalfx.spatial	0005-host-makefile-metalfx.patch	MetalFX 空间放大，默认关
+0007-main-launch-settings.patch	base	-	-	启动器设置界面的入口
+0008-build-ipa-launch-defaults.patch	base	-	-	打包时写入启动默认值与独立 RomFS 的开关
+0009-build-ipa-from-nsp-webui.patch	base	-	-	WebUI 的 NSP 打包入口
+0010-nso-sym-dynsym-widths.patch	base	-	-	有的 SDK 写 8 字节动态项和 16 字节符号表
+0011-ios-audio-probe-host.patch	custom	audio.gain	-	音频增益探针与静音开关
+0012-ios-audio-probe-session.patch	base	-	-	音频会话类别
+0013-ios-letterbox-chrome.patch	custom	picture.chrome	-	画面四周的边框与按键
+0014-nvn-screen-fill.patch	custom	picture.fill	-	画面填充方式（fit/cover/stretch/wide）
+0015-ios-screen-fill.patch	custom	picture.fill	0014-nvn-screen-fill.patch	宿主侧按填充方式铺画面
+0016-shader-split-zstd-module.patch	base	toolchain.windows	-	没有 zstd 命令时用模块
+0017-shader-gs-stage-layout.patch	base	-	-	几何级着色器的输入布局
+0018-shader-gs-ssbo-slot.patch	base	-	0017-shader-gs-stage-layout.patch	几何级着色器的存储缓冲槽位
+0019-nvn-gs-ssbo-base.patch	base	-	0018-shader-gs-ssbo-slot.patch	运行期写入几何级存储缓冲
+0020-host-output-size-fields.patch	base	-	-	模块结构多两个输出尺寸字段
+0021-host-screen-aspect-decl.patch	base	-	-	屏幕比例的声明
+0022-host-output-aspect-loader.patch	custom	picture.aspect	0020-host-output-size-fields.patch,0021-host-screen-aspect-decl.patch	按屏幕比例算输出尺寸
+0023-nso-output-size-fixups.patch	base	-	0020-host-output-size-fields.patch	输出尺寸的重写表
+0024-game-aspect-key.patch	base	picture.aspect	-	profile 里的 aspect 键
+0025-settings-aspect-row.patch	custom	picture.aspect	0024-game-aspect-key.patch	设置页里的比例选项
+0026-settings-cond-and.patch	base	-	-	设置的显示条件可以与
+0027-ios-wide-canvas.patch	custom	picture.proj_widen	-	画布按屏幕比例
+0028-ios-gamepad-canvas-touch.patch	custom	picture.proj_widen	0027-ios-wide-canvas.patch	触摸坐标映射到同一个画布
+0029-botw-output-size-stub.patch	custom	picture.aspect	0022-host-output-aspect-loader.patch	旷野之息的输出尺寸桩
+0030-botw-aspect-any.patch	custom	picture.aspect	0029-botw-output-size-stub.patch	旷野之息用 aspect any
+0031-nvn-projection-probe.patch	custom	proj.probe	-	只读地找出顶点着色器里的投影矩阵
+0032-host-projection-widen-dm__gfx__nvn__nvn_mtl.m.patch	custom	picture.proj_widen	0031-nvn-projection-probe.patch	按画面拉伸的比例加宽横向视野
+0032-host-projection-widen-dm__ios__Sources__front_ios.m.patch	custom	picture.proj_widen	0027-ios-wide-canvas.patch	宽模式下画布铺满屏幕
+0033-sf-serve-connected-services.patch	base	-	-	宿主对每个服务都给一个空会话，否则游戏会踩空句柄
+0034-projection-detection-range-dm__gfx__nvn__nvn_mtl.m.patch	custom	picture.proj_widen	0032-host-projection-widen-dm__gfx__nvn__nvn_mtl.m.patch	投影矩阵的识别范围放宽
+0035-host-buttons-colour-dm__ios__Sources__DmGamepad.m.patch	custom	picture.chrome	0013-ios-letterbox-chrome.patch	宿主按键用自己的颜色
+0036-chrome-colour-no-reflection-dm__ios__Sources__front_ios.m.patch	custom	picture.reflect	0013-ios-letterbox-chrome.patch	黑边反射默认关
+0037-chrome-restore-button-dm__ios__Sources__front_ios.m.patch	custom	picture.chrome	0013-ios-letterbox-chrome.patch	隐藏边框后能恢复
+0038-cb-extent-thread-pool-dm__gfx__tools__cb_extent.py.patch	base	toolchain.windows	-	Windows 上线程池不会丢结果（已退役）
+0039-proj-shadow-ui-matrix-dm__gfx__nvn__nvn_mtl.m.patch	custom	picture.proj_widen	0032-host-projection-widen-dm__gfx__nvn__nvn_mtl.m.patch	界面层自己的矩阵也要改（已退役，会闪烁）
+0040-proj-probe-log-spam-dm__gfx__nvn__nvn_mtl.m.patch	custom	proj.probe	0031-nvn-projection-probe.patch	探针按值开关并限频（已退役）
+0041-proj-all-slots-dm__gfx__nvn__nvn_mtl.m.patch	custom	proj.probe	0031-nvn-projection-probe.patch	一个 uniform 里的多个矩阵都找出（已退役）
+0042-host-picture-layer-dm__ios__Sources__front_ios.m.patch	custom	picture.chrome	0013-ios-letterbox-chrome.patch	边框作为独立图层（已退役）
+0042-proj-correct-once-dm__gfx__nvn__nvn_mtl.m.patch	custom	picture.proj_widen	0032-host-projection-widen-dm__gfx__nvn__nvn_mtl.m.patch	每个矩阵只改一次（已退役）
+0043-audio-level-dm__host__hle_audio.c.patch	custom	audio.gain	0011-ios-audio-probe-host.patch	音量（已退役）
+0043-audio-volume-watch-dm__ios__Sources__front_ios.m.patch	custom	audio.gain	0011-ios-audio-probe-host.patch	音量按键监视（已退役）
+0043-present-clamp-dm__gfx__nvn__nvn_mtl.m.patch	base	-	-	呈现时的钳位（已退役）
+0043-proj-generation-dm__gfx__nvn__nvn_mtl.m.patch	custom	proj.probe	0031-nvn-projection-probe.patch	探针按代次重扫（已退役）
+0043-proj-unreadable-dm__gfx__nvn__nvn_mtl.m.patch	custom	proj.probe	0031-nvn-projection-probe.patch	探针跳过读不到的区域（已退役）
+0043-rumble-level-dm__host__haptics_apple.m.patch	custom	rumble.gain	-	震动强度（已退役）
+0043-rumble-permit-dm__host__hle_hid.c.patch	custom	rumble.permit	-	震动许可（已退役）
+0044-audio-level-dm__host__hle_audio.c.patch	custom	audio.gain	0011-ios-audio-probe-host.patch	音量增益
+0045-rumble-level-dm__host__haptics_apple.m.patch	custom	rumble.gain	-	震动强度
+0046-rumble-permit-dm__host__hle_hid.c.patch	custom	rumble.permit	-	游戏问能不能震动时一律允许
+0047-ios-chinese-dialogs-dm__ios__Sources__front_ios.m.patch	custom	ui.zh_dialogs	-	系统对话框的中文文案
+0048-ios-touch-canvas-dm__ios__Sources__front_ios.m.patch	custom	picture.proj_widen	0028-ios-gamepad-canvas-touch.patch	触摸画布随宽屏（已退役）
+0048-screen-aspect-fills-dm__ios__Sources__front_ios.m.patch	custom	picture.fill	0015-ios-screen-fill.patch	屏幕比例决定画面怎么铺
+0049-proj-safe-copy-dm__gfx__nvn__nvn_mtl.m.patch	base	picture.proj_widen	0032-host-projection-widen-dm__gfx__nvn__nvn_mtl.m.patch	读投影只在副本上做，不再踩到没映射的页
+0050-drawable-and-memory-warning-dm__ios__Sources__front_ios.m.patch	base	perf.hud	-	drawable 不白扔，内存警告记一笔
+0051-eh-frame-optional-dm__tools__patch_nso.py.patch	base	-	-	没有 .eh_frame_hdr 也能改（未入队）
+0052-proj-probe-safe-dm__gfx__nvn__nvn_mtl.m.patch	base	proj.probe	0031-nvn-projection-probe.patch	探针逐页向内核确认映射
+0053-wonder-romfs-marker-dm__games__010015100B514000__game.tsv.patch	base	-	-	惊奇的 RomFS 标记
