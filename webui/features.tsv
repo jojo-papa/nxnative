@@ -26,7 +26,6 @@ rumble.permit	允许游戏震动	手感	runtime	DM_RUMBLE_PERMIT	0,1	1	游戏问
 perf.hud	性能信息	诊断	runtime	DM_METAL_HUD	0,1	0	显示 FPS、输入输出分辨率与内存占用
 proj.probe	投影诊断探针	诊断	runtime	DM_NVN_PROJ	0,1	0	逐帧记录顶点着色器绑定的 uniform 里的投影矩阵，用来定位画面比例问题；会刷日志
 debug.textures	调试贴图绑定	诊断	runtime	DM_NVN_DRAW_TEXTURES	0,1	0	把每次绘制的贴图绑定记进 draw-textures.tsv（约 64 MiB），会拖慢性能
-metalfx.spatial	MetalFX 空间放大	画面	runtime	DM_METALFX_SPATIAL	0,1	0	用 MetalFX 把画面放大，耗 GPU 与发热
-metalfx.present	MetalFX 显示放大	画面	runtime	DM_METALFX_PRESENT	0,1	0	在呈现这一步放大
+metalfx.spatial	MetalFX 空间放大	画面	runtime	DM_PRESENT_UPSCALE	metalfx,off	off	用上游的 MetalFX 空间放大（DM_PRESENT_UPSCALE=metalfx）：画面按屏幕比例放大，耗 GPU 与发热；off 是普通双线性
 ui.zh_dialogs	中文对话框	界面	build	-	-	-	系统对话框的中文文案是编译期替换的，运行时改不了；要关只能换一个语言重新构建
 toolchain.windows	Windows 构建适配	工具链	build	-	-	-	POSIX 路径、zstd 模块回退等：只影响在 Windows 上能不能构建出来，跟玩家的画面无关

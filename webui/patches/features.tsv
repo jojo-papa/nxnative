@@ -3,8 +3,6 @@ patch	kind	feature	needs	reason
 0002-gen-embed-posix-paths-sections.patch	base	toolchain.windows	-	生成的内嵌段用 POSIX 路径
 0003-hle-count-targetconditionals.patch	base	-	-	条件编译在别的 SDK 上不成立
 0004-nx-extract-catalog.patch	base	-	-	解包工具要支持整包目录
-0005-host-makefile-metalfx.patch	base	-	-	宿主要链 MetalFX 才能用空间放大（它是 0006 的前置，不是它的一部分）
-0006-nvn-mtl-spatial-upscaling.patch	custom	metalfx.spatial	0005-host-makefile-metalfx.patch	MetalFX 空间放大，默认关
 0007-main-launch-settings.patch	base	-	-	启动器设置界面的入口
 0008-build-ipa-launch-defaults.patch	base	-	-	打包时写入启动默认值与独立 RomFS 的开关
 0009-build-ipa-from-nsp-webui.patch	base	-	-	WebUI 的 NSP 打包入口
@@ -61,3 +59,4 @@ patch	kind	feature	needs	reason
 0051-eh-frame-optional-dm__tools__patch_nso.py.patch	base	-	-	没有 .eh_frame_hdr 也能改（未入队）
 0052-proj-probe-safe-dm__gfx__nvn__nvn_mtl.m.patch	base	proj.probe	0031-nvn-projection-probe.patch	探针逐页向内核确认映射
 0053-wonder-romfs-marker-dm__games__010015100B514000__game.tsv.patch	base	-	-	惊奇的 RomFS 标记
+0054-present-upscale-hud.patch	custom	metalfx.spatial	-	上游自己有 MetalFX 空间放大（DM_PRESENT_UPSCALE）；这条只把它的状态读给性能 HUD

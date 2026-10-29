@@ -24,8 +24,7 @@ OVERLAY_ROOT = REPO / 'webui' / 'overlays'
 PATCH_ROOT = REPO / 'webui' / 'patches'
 
 OVERLAY_TARGETS = {
-    'dm/gfx/nvn/nvn_spatial.inc',
-    'dm/gfx/nvn/nvn_spatial_size.h',
+    'dm/gfx/nvn/nvn_fx.inc',
     'dm/ios/Sources/DmLaunchSettings.h',
     'dm/ios/Sources/DmLaunchSettings.m',
     'dm/ios/Sources/DmPerfHud.m',
