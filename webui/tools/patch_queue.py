@@ -16,12 +16,24 @@ from webui import diffapply, staging
 
 
 def check(tree: Path):
+    """Apply every patch in series order, each one on the result of the patches
+    before it on the same target (staging.ensure() does the same).
+
+    Applying a patch to the untouched file would fail for every target that more
+    than one patch touches: the later patches are written against the result of
+    the earlier ones, not against the base.
+    """
     results = []
+    contents = {}
     for patch, target in staging.patch_queue():
         source = tree / target
         if not source.is_file():
             raise ValueError(f'missing target: {target}')
-        data = diffapply.apply_file(source, patch.read_bytes(), target)
+        base = contents.get(target)
+        if base is None:
+            base = source.read_bytes()
+        data = diffapply.apply_bytes(base, patch.read_bytes(), target)
+        contents[target] = data
         results.append({'patch': patch.name, 'target': target, 'bytes': len(data)})
     return results
 

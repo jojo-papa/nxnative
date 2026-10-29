@@ -41,6 +41,11 @@ SKIP_REL_PREFIXES = (
     'dm/host/gen',
     'dm/tools/nx_extract/bin',
     'dm/tools/nx_extract/obj',
+    # The build products live in out/ at the repository root (packaged IPAs,
+    # screenshots, research notes).  They are output, not source: copying them
+    # into every stage tree would copy tens of gigabytes per build and fill
+    # the disk.  See rule R-16.
+    'out',
 )
 SKIP_FILES = {'dm/ios/Sources/Info.plist'}
 
