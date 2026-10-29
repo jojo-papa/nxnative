@@ -1,8 +1,8 @@
 diff --git a/scripts/build_ipa_from_nsp.py b/scripts/build_ipa_from_nsp.py
-index 2cf3391..89ac729 100755
+index 832d4c3..2e9b13b 100644
 --- a/scripts/build_ipa_from_nsp.py
 +++ b/scripts/build_ipa_from_nsp.py
-@@ -105,6 +105,9 @@ class Progress:
+@@ -126,6 +126,9 @@
  
      def stage(self, name, poll=None, step='', **kw):
          """Start the next stage, ending the current one. kw: set()'s arguments"""
@@ -12,16 +12,16 @@ index 2cf3391..89ac729 100755
          with self.lock:
              self.end()
              self.k += 1; now = time.time()
-@@ -1472,6 +1475,8 @@ def parse_args(argv):
+@@ -2075,6 +2078,8 @@
      ap.add_argument('-l', '--language', help='game language, a code or a name: ja, fr, de, es, it, nl, pt, ru, ko, zh-Hans, zh-Hant, en-GB, fr-CA, es-419, pt-BR, Japanese, ... (default: the LANGUAGE setting, else English); '
                      'it must be one the game supports, which the console lists')
      ap.add_argument('--keep-extracted', action=argparse.BooleanOptionalAction, help='keep the extracted game files after the IPA is built, for the next build (default: the KEEP_EXTRACTED setting, on)')
 +    ap.add_argument('--target', choices=('ios', 'mac'), default='ios')
 +    ap.add_argument('--separate-romfs', action='store_true', help='leave the game files out of the IPA and write <ipa>.romfs.zip')
      ap.add_argument('--env-file', help='environment switches for a diagnostic build (one KEY=VALUE per line)')
-     ap.add_argument('--show-fps', action=argparse.BooleanOptionalAction, help='show the game\'s frame rate on the iPhone, frames on screen per second at the top left (default: the SHOW_FPS setting, on)')
-     ap.add_argument('--survey-only', action='store_true', help='a game with no profile: only the survey, no provisional profile and no IPA')
-@@ -1501,10 +1506,15 @@ def report_profile_status(g, reg, pkg_ver, derived, provisional, artifact='IPA')
+     ap.add_argument('--gpu', help='NVN games: GPU architectures the app gets its pipeline archive for, made on this Mac with metal-tt, comma-separated: g18p (A19 / A19 Pro), or the name a device\'s log gives when the app has no archive for its GPU; '
+                     'none = no archive, the device builds the bases on its first start (default: the PSO_GPUS setting; when that is empty, g18p for a game whose profile sets pso_mtl4 on, else none). '
+@@ -2151,6 +2156,8 @@
  
  def main(args=None):
      args = args or parse_args([])
@@ -29,17 +29,20 @@ index 2cf3391..89ac729 100755
 +        raise BuildError('--separate-romfs is only available for iOS IPAs')
      PROG.mode = progress_mode(args.progress or PROGRESS)
      global ALLOW_DAMAGED; ALLOW_DAMAGED = args.allow_damaged or ALLOW_DAMAGED
+     global ALLOW_SHADER_REGRESSIONS; ALLOW_SHADER_REGRESSIONS = args.allow_shader_regressions or ALLOW_SHADER_REGRESSIONS
+@@ -2158,6 +2165,9 @@
      here = Path(globals().get('__file__') or sys.argv[0]).resolve()
+     if sys.version_info < (3, 12): raise BuildError('Direct RomFS image builds require Python 3.12 or newer')
      repo = find_repo(here)
 +    sys.path.insert(0, str(repo))
 +    from webui.build.romfs_archive import (archive_path, pack_command, prepare_archive,
 +                                           verify_archive, verify_no_romfs)
      prepare_xcode = args.prepare_xcode or PREPARE_XCODE
      platform = args.platform or PLATFORM
-     if platform not in ('ios', 'mac'): raise BuildError(f'PLATFORM / --platform must be ios or mac: {platform}')
-@@ -1623,6 +1633,12 @@ def main(args=None):
+     if platform not in ('ios', 'mac', 'mac-app'): raise BuildError(f'PLATFORM / --platform must be ios, mac or mac-app: {platform}')
+@@ -2291,6 +2301,12 @@
      # how the shaders are got follows from the packed version's files (profile_guess.py shader_sources): the graphics API, and the shaders made only at run time
-     src = pg.build_sources(game / 'ExeFS', game / 'RomFS', g.words('modules'))
+     src = pg.build_sources(game / 'ExeFS', rfs.source(game), g.words('modules'))
      gfx = src['graphics'][0]   # nvn, vulkan (Hades: the host's Vulkan layer, SPIR-V shaders) or gl (Digimon Story Cyber Sleuth: the host's GL layer, GLSL sources)
 +    if env.get('NX_LAUNCH_DEFAULTS'):
 +        launch = json.loads(Path(env['NX_LAUNCH_DEFAULTS']).read_text(encoding='utf-8'))
@@ -50,15 +53,15 @@ index 2cf3391..89ac729 100755
      glslc = gfx == 'nvn' and src['glslc_capture'][0]   # shaders the game compiles at run time, captured in the Mac host (capture_glslc)
      vkcap = gfx == 'vulkan' and src['vk_capture'][0]   # SPIR-V shaders the game generates at run time, captured in the Mac host (capture_shaders)
      glcap = gfx == 'gl' and src['gl_capture'][0]   # GLSL the game puts together at run time (LÖVE), captured in the Mac host (capture_shaders)
-@@ -1683,9 +1699,21 @@ def main(args=None):
-         report_profile_status(g, reg, pkg_ver, derived, provisional, 'Mac build')
+@@ -2384,9 +2400,21 @@
+         report_profile_status(g, reg, pkg_ver, derived, provisional, 'Mac build', patched)
          return
  
 +    if args.target == 'mac':
 +        if gfx == 'gl': raise BuildError('macOS app packaging does not support the GL renderer')
 +        PROG.stage('Mac application pack')
 +        command = [py, repo / 'webui/build/macos/pack_app.py', '--game', g.id, '--patched', patched,
-+                   '--romfs', game / 'RomFS', '--shaders', sh if gfx == 'vulkan' else sh / 'cache',
++                   '--romfs', rfs.source(game), '--shaders', sh if gfx == 'vulkan' else sh / 'cache',
 +                   '--out', out_ipa, '--name', app_name, '--version', app_version or '1.0', '--graphics', gfx]
 +        if aoc: command += ['--aoc', aoc]
 +        if env.get('NX_LAUNCH_DEFAULTS'): command += ['--launch-defaults', env['NX_LAUNCH_DEFAULTS']]
@@ -68,12 +71,12 @@ index 2cf3391..89ac729 100755
 +        return
      if not prepare_xcode and free_gb(out_ipa.parent) < 5: raise BuildError(f'less than 5 GB free on the volume of {out_ipa.parent}')
      say('preparing the Xcode project' if prepare_xcode else f'building the IPA → {out_ipa}')
--    ipa_env = dict(env, GAME=g.id, W=str(work / 'ipa'), PATCHED=str(patched), ROMFS=str(game / 'RomFS'), MSL_IOS=str(ios), GFXAPI=gfx, FONT_PY=py, DM_DISPLAY_NAME=app_name, DM_BUNDLE_ID=bundle_id, AOC=str(aoc or ''), DM_XCODE_DERIVED_DATA=str(work / 'xcode-derived-data'), DM_TEAM_ID=team_id, DM_LANG=lang)
-+    ipa_env = dict(env, GAME=g.id, W=str(work / 'ipa'), PATCHED=str(patched), ROMFS=str(game / 'RomFS'), MSL_IOS=str(ios), GFXAPI=gfx, FONT_PY=py, DM_DISPLAY_NAME=app_name, DM_BUNDLE_ID=bundle_id, AOC=str(aoc or ''), DM_XCODE_DERIVED_DATA=str(work / 'xcode-derived-data'), DM_TEAM_ID=team_id, DM_LANG=lang, NX_SEPARATE_ROMFS='1' if args.separate_romfs else '')
+-    ipa_env = dict(env, GAME=g.id, W=str(work / 'ipa'), PATCHED=str(patched), ROMFS=str(rfs.source(game)), MSL_IOS=str(ios), GFXAPI=gfx, FONT_PY=py, DM_DISPLAY_NAME=app_name, DM_BUNDLE_ID=bundle_id, AOC=str(aoc or ''), DM_XCODE_DERIVED_DATA=str(work / 'xcode-derived-data'), DM_TEAM_ID=team_id, DM_LANG=lang)
++    ipa_env = dict(env, GAME=g.id, W=str(work / 'ipa'), PATCHED=str(patched), ROMFS=str(rfs.source(game)), MSL_IOS=str(ios), GFXAPI=gfx, FONT_PY=py, DM_DISPLAY_NAME=app_name, DM_BUNDLE_ID=bundle_id, AOC=str(aoc or ''), DM_XCODE_DERIVED_DATA=str(work / 'xcode-derived-data'), DM_TEAM_ID=team_id, DM_LANG=lang, NX_SEPARATE_ROMFS='1' if args.separate_romfs else '')
      if prepare_xcode: ipa_env['DM_XCODE_PROJECT_DIR'] = str(project.parent)
-     if app_version: ipa_env['DM_APP_VERSION'] = app_version
-     # app icon: the game icon nx_extract saved from the control data (English, icon.jpg); the packed version's first, then the base game's
-@@ -1715,6 +1743,19 @@ def main(args=None):
+     separate = romfs_mode == 'separate'
+     if separate: ipa_env['DM_COPY_ROMFS'] = 'NO'; say('game files: separate (DM_COPY_ROMFS=NO), left out of the app; the image stays at ' + str(rfs.source(game)))
+@@ -2421,6 +2449,19 @@
      run(['bash', repo / 'dm/ios/tools/build_ipa.sh', out_ipa], logs / 'build_ipa.log', env=ipa_env, on_line=watch.line)
      if not out_ipa.is_file(): raise BuildError(f'no IPA at {out_ipa}')
      PROG.end(f'{out_ipa.name}, {amount(out_ipa.stat().st_size, "B")}')
@@ -82,8 +85,8 @@ index 2cf3391..89ac729 100755
 +        PROG.stage('RomFS archive')
 +        archive = archive_path(out_ipa)
 +        try:
-+            prepare_archive(archive, game / 'RomFS', g.get('romfs_marker'))
-+            run(pack_command(py, repo / 'dm/ios/tools/pack_ipa.py', archive, game / 'RomFS', g.get('zip_store', '')),
++            prepare_archive(archive, rfs.source(game), g.get('romfs_marker'))
++            run(pack_command(py, repo / 'dm/ios/tools/pack_ipa.py', archive, rfs.source(game), g.get('zip_store', '')),
 +                logs / 'romfs_archive.log', env=env)
 +            verify_archive(archive, g.get('romfs_marker'))
 +            verify_no_romfs(out_ipa)

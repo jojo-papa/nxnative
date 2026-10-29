@@ -1,8 +1,8 @@
 diff --git a/dm/tools/nx_extract/Program.cs b/dm/tools/nx_extract/Program.cs
-index 5d7c0bb..9f2f896 100644
+index e8c1392..b8521f3 100644
 --- a/dm/tools/nx_extract/Program.cs
 +++ b/dm/tools/nx_extract/Program.cs
-@@ -26,6 +26,10 @@ static class P {
+@@ -30,6 +30,10 @@
      [DllImport("libc", SetLastError = true)] static extern int clonefile(string src, string dst, uint flags);
  
      static int Main(string[] a) {
@@ -11,12 +11,14 @@ index 5d7c0bb..9f2f896 100644
 +            catch { Console.Error.WriteLine("Package metadata could not be read; check keys and integrity."); return 2; }
 +        }
          bool manifest = Array.IndexOf(a, "--manifest") >= 0; a = Array.FindAll(a, s => s != "--manifest");
+         bool image = Array.IndexOf(a, "--romfs-image") >= 0; a = Array.FindAll(a, s => s != "--romfs-image");
          g_allow = Array.IndexOf(a, "--allow-damaged") >= 0; a = Array.FindAll(a, s => s != "--allow-damaged");
-         if (a.Length < 4) { Console.Error.WriteLine("usage: nx_extract <prod.keys> <base.nsp> <update.nsp|-> <out dir> [base RomFS dir] [--manifest] [--allow-damaged]\n       nx_extract <prod.keys> --aoc <dlc.nsp> <out dir>"); return 2; }
-@@ -125,6 +129,43 @@ static class P {
+@@ -153,6 +157,43 @@
+         Nca r = null;
+         foreach (Nca n in l) if (n.Header.ContentType == t && (id == null ? r == null || n.Header.TitleId < r.Header.TitleId : n.Header.TitleId == id)) r = n;
          return r;
-     }
- 
++    }
++
 +    // Read CNMT through LibHac so filenames are never the source of title identity.
 +    static int Catalog(string keys, string path) {
 +        KeySet ks = ExternalKeyReader.ReadKeyFile(keys);
@@ -52,8 +54,6 @@ index 5d7c0bb..9f2f896 100644
 +        }
 +        Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(titles));
 +        return 0;
-+    }
-+
+     }
+ 
      // Icon: the control data holds one 256x256 JPEG per language (/icon_<language>.dat). Use the English one (American, then British); if neither exists, take the first in NACP language order
-     static readonly string[] IconLangs = { "AmericanEnglish", "BritishEnglish", "Japanese", "French", "German", "LatinAmericanSpanish", "Spanish", "Italian",
-                                            "Dutch", "CanadianFrench", "Portuguese", "Russian", "Korean", "TraditionalChinese", "SimplifiedChinese", "BrazilianPortuguese" };

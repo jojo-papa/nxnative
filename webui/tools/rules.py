@@ -68,7 +68,7 @@ RULES = [
         'id': 'R-04', 'section': 'baseline', 'status': ACTIVE,
         'title': '主分支只进不退',
         'rule': 'main 只能由一次绿灯的 daily 得到；任何失败、任何红灯都不许动 main。',
-        'check': 'main 包含 webui/patches/UPSTREAM_BASE 记录的上游提交',
+        'check': '被测分支（主工作树是 main，daily 工作树是 daily）包含 webui/patches/UPSTREAM_BASE 记录的上游提交',
         'fix': 'main 被改动了。回退到最近一次绿灯的提交，或重新跑一次 daily 让它绿灯。',
     },
     {
@@ -265,8 +265,14 @@ def git_ok(*args):
 
 # ---------- the checks ----------
 
+def branch_under_test():
+    """The branch the tree is checked out on (main on the fork, daily in its worktree)."""
+    name = git_out('rev-parse', '--abbrev-ref', 'HEAD').strip()
+    return name if name and name != 'HEAD' else 'main'
+
+
 def check_r04_main_never_goes_back():
-    """main must still contain the upstream commit the fork recorded."""
+    """The branch under test must still contain the upstream commit it recorded."""
     base = ROOT / 'webui' / 'patches' / 'UPSTREAM_BASE'
     upstream = ''
     if base.is_file():
@@ -277,9 +283,10 @@ def check_r04_main_never_goes_back():
         return [(False, 'webui/patches/UPSTREAM_BASE 里没有 upstream 行')]
     if not git_ok('cat-file', '-e', upstream + '^{commit}'):
         return [(False, f'上游提交 {upstream[:12]} 不在本仓库里')]
-    if git_ok('merge-base', '--is-ancestor', upstream, 'main'):
-        return [(True, f'main 包含上游 {upstream[:12]}')]
-    return [(False, f'main 不包含上游 {upstream[:12]} —— main 被改回去了')]
+    branch = branch_under_test()
+    if git_ok('merge-base', '--is-ancestor', upstream, branch):
+        return [(True, f'{branch} 包含上游 {upstream[:12]}')]
+    return [(False, f'{branch} 不包含上游 {upstream[:12]} —— 主分支被改回去了')]
 
 
 def check_r05_stage_gate_is_in_the_gate():

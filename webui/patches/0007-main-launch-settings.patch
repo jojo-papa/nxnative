@@ -1,24 +1,16 @@
 diff --git a/dm/ios/Sources/main.m b/dm/ios/Sources/main.m
-index 4ffddaf..a7fe356 100644
+index ca996cf..0445373 100644
 --- a/dm/ios/Sources/main.m
 +++ b/dm/ios/Sources/main.m
 @@ -1,6 +1,7 @@
  // iOS App entry: set the environment (game files, saves, shader libraries), write the host log to Documents/log.txt, create the window (front_ios.m), then run the host's dm_main on a big-stack thread.
- // The game files (RomFS) ship inside the App at <App>/romfs; Documents/romfs placed through the Files app is also accepted (lets you swap them without reinstalling).
+ // The game files (RomFS) ship inside the App at <App>/romfs; Documents/romfs.img (one image, scripts/push_romfs.sh; its name in any letter case) or a Documents/romfs folder is also accepted (lets you swap them without reinstalling).
  #import <UIKit/UIKit.h>
 +#import "DmLaunchSettings.h"
  #include <pthread.h>
  #include <signal.h>
  #include <stdio.h>
-@@ -92,6 +93,7 @@ int front_ios_boot_ok(void) { return g_boot_ok; }
- @interface App : UIResponder <UIApplicationDelegate>
- @end
- @implementation App
-+- (void)applicationDidReceiveMemoryWarning:(UIApplication *)app { void dm_gfx_memory_pressure(void); dm_gfx_memory_pressure(); }
- - (UISceneConfiguration *)application:(UIApplication *)a configurationForConnectingSceneSession:(UISceneSession *)s options:(UISceneConnectionOptions *)o {
-     return [[UISceneConfiguration alloc] initWithName:@"Default" sessionRole:s.role];
- }
-@@ -104,11 +106,14 @@ int front_ios_boot_ok(void) { return g_boot_ok; }
+@@ -190,7 +191,10 @@
  @implementation SceneDelegate
  - (void)scene:(UIScene *)scene willConnectToSession:(UISceneSession *)session options:(UISceneConnectionOptions *)o {
      self.window = [[UIWindow alloc] initWithWindowScene:(UIWindowScene *)scene];
@@ -30,8 +22,3 @@ index 4ffddaf..a7fe356 100644
      [self.window makeKeyAndVisible];
  }
  - (void)sceneWillResignActive:(UIScene *)s { front_ios_focus_event(0); }
--- (void)sceneDidEnterBackground:(UIScene *)s { front_ios_focus_event(1); }
-+- (void)sceneDidEnterBackground:(UIScene *)s { void dm_gfx_spatial_trim(void); dm_gfx_spatial_trim(); front_ios_focus_event(1); }
- - (void)sceneWillEnterForeground:(UIScene *)s { front_ios_focus_event(2); }
- - (void)sceneDidBecomeActive:(UIScene *)s { front_ios_focus_event(3); }
- @end

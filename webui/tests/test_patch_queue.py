@@ -10,20 +10,20 @@ MARKERS = {
     '0002-gen-embed-posix-paths-sections.patch': ['no_dead_strip'],
     '0003-hle-count-targetconditionals.patch': ['TargetConditionals'],
     '0004-nx-extract-catalog.patch': ['--catalog'],
-    '0005-host-makefile-metalfx.patch': ['MetalFX'],
-    '0006-nvn-mtl-spatial-upscaling.patch': ['nvn_spatial.inc'],
     '0007-main-launch-settings.patch': ['DmLaunchSettings.h'],
     '0008-build-ipa-launch-defaults.patch': ['NX_LAUNCH_DEFAULTS', 'NX_SEPARATE_ROMFS'],
     '0009-build-ipa-from-nsp-webui.patch': ['@NXEVENT', 'webui/build/macos/pack_app.py',
                                             '--separate-romfs', 'NX_SEPARATE_ROMFS',
                                             'RomFS archive'],
+    '0054-present-upscale-hud.patch': ['nvn_fx.inc'],
 }
 
 
 class PatchQueueTests(unittest.TestCase):
     def test_patches_apply_and_add_markers(self):
         queue = staging.patch_queue()
-        self.assertEqual(len(queue), 9)
+        self.assertEqual(len(queue), 8)
+        self.assertEqual({patch.name for patch, _ in queue}, set(MARKERS))
         for patch, target in queue:
             data = diffapply.apply_file(REPO / target, patch.read_bytes(), target)
             text = data.decode('utf-8')

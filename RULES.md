@@ -49,7 +49,7 @@ python webui/tools/rules.py --rule R-11 --json
 **R-04** 主分支只进不退
 > main 只能由一次绿灯的 daily 得到；任何失败、任何红灯都不许动 main。
 
-- 检查：main 包含 webui/patches/UPSTREAM_BASE 记录的上游提交
+- 检查：被测分支（主工作树是 main，daily 工作树是 daily）包含 webui/patches/UPSTREAM_BASE 记录的上游提交
 - 状态：`active`
 - 违反时：main 被改动了。回退到最近一次绿灯的提交，或重新跑一次 daily 让它绿灯。
 

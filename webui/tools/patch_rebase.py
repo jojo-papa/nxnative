@@ -365,28 +365,50 @@ def write_regenerated(verdicts, directory, base):
     return series
 
 
-def regenerate_from_tree(tree, base, directory):
+def regenerate_from_tree(tree, base, directory, verdicts=None):
     """Write the patches that turn *base* into *tree*.
 
     After a person has fixed the files by hand in a worktree, this makes the
     patch files say what the tree actually does.  A target that the tree did
-    not change drops out of the series.
+    not change keeps its patch: the worktree holds the unpatched upstream
+    files, so "no change in the tree" means "nobody touched this one", not
+    "the patch is empty".  A patch the judge called DROP_BASELINE_HAS_IT is
+    dropped, and a target the tree changed is written out again.
     """
     tree = Path(tree)
     directory = Path(directory)
     directory.mkdir(parents=True, exist_ok=True)
+    verdicts = verdicts or {}
     series = []
     changed = []
     dropped = []
+    kept = []
     for patch_path, target in staging.patch_queue():
         after_path = tree / target
+        verdict = verdicts.get(patch_path.name, {})
+        if verdict.get('verdict') == DROP:
+            dropped.append(patch_path.name)
+            continue
         if not after_path.is_file():
             dropped.append(patch_path.name)
             continue
         before = read_at(base, target)
         if before is None:
             raise ValueError(f'{base}:{target} 不在新基线里')
-        data = make_patch(target, before, after_path.read_bytes())
+        after = after_path.read_bytes()
+        # The worktree's files are checked out with CRLF on Windows and the
+        # blobs are LF, so compare the texts, not the bytes.
+        after_lines, after_trailing = split_lines(after)
+        before_lines, before_trailing = split_lines(before)
+        if after_lines == before_lines and after_trailing == before_trailing:
+            # Nobody touched this file in the tree: keep the patch as it is.
+            if patch_path.is_file() and patch_path.stat().st_size:
+                series.append(f'{patch_path.name} {target}')
+                kept.append(patch_path.name)
+                continue
+            dropped.append(patch_path.name)
+            continue
+        data = make_patch(target, before, after)
         if data is None:
             dropped.append(patch_path.name)
             continue
@@ -394,8 +416,31 @@ def regenerate_from_tree(tree, base, directory):
         series.append(f'{patch_path.name} {target}')
         changed.append(patch_path.name)
     (directory / 'series').write_text('\n'.join(series) + '\n', encoding='utf-8')
-    (directory / 'UPSTREAM_BASE').write_text(f'base {base}\n', encoding='utf-8')
-    return {'series': series, 'changed': changed, 'dropped': dropped}
+    resolved = git_text('rev-parse', base).strip() or base
+    write_upstream_base(directory / 'UPSTREAM_BASE', resolved)
+    return {'series': series, 'changed': changed, 'dropped': dropped, 'kept': kept}
+
+
+def write_upstream_base(path, resolved):
+    """Record the new base, keeping the other lines of the file."""
+    lines = []
+    if path.is_file():
+        lines = path.read_text(encoding='utf-8').splitlines()
+    out = []
+    seen_base = False
+    for line in lines:
+        parts = line.split()
+        if parts and parts[0] == 'base':
+            out.append(f'base {resolved}')
+            seen_base = True
+            continue
+        if parts and parts[0] == 'upstream':
+            out.append(f'upstream {resolved}')
+            continue
+        out.append(line)
+    if not seen_base:
+        out.insert(0, f'base {resolved}')
+    path.write_text('\n'.join(out) + '\n', encoding='utf-8')
 
 
 def json_safe(verdicts):
@@ -430,13 +475,15 @@ def main(argv=None):
 
     if args.from_tree:
         directory = args.regenerate or ROOT / 'webui' / 'patches'
-        result = regenerate_from_tree(args.from_tree, args.base, directory)
+        verdicts = {v['patch']: v for v in judge_all(old_base, args.base)}
+        result = regenerate_from_tree(args.from_tree, args.base, directory, verdicts)
         if args.json:
             print(json.dumps(result, indent=2, ensure_ascii=False))
         else:
-            print(f'从 {args.from_tree} 重新生成了 {len(result["changed"])} 条补丁')
+            print(f'从 {args.from_tree} 重新生成了 {len(result["changed"])} 条补丁，'
+                  f'保留了 {len(result["kept"])} 条')
             for name in result['dropped']:
-                print(f'  丢弃（树里没有改动）: {name}')
+                print(f'  丢弃: {name}')
         return 0
 
     verdicts = judge_all(old_base, args.base)
