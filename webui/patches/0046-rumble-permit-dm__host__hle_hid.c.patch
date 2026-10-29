@@ -1,0 +1,20 @@
+diff --git a/dm/host/hle_hid.c b/dm/host/hle_hid.c
+--- a/dm/host/hle_hid.c
++++ b/dm/host/hle_hid.c
+@@ -362,7 +362,15 @@
+     for (int k = 0; k < DM_PLAYERS * 2; k++) if (used >> k & 1) updates[count++] = updates[k];
+     dm_haptics_send(updates, count);
+ }
+-HLE_FORCE("_ZN2nn3hid20IsVibrationPermittedEv", "vibration permission: enabled and an output available", unsigned, h_hid_VibPermit, void) { return dm_haptics_available() != 0; }
++HLE_FORCE("_ZN2nn3hid20IsVibrationPermittedEv", "vibration permission: enabled and an output available", unsigned, h_hid_VibPermit, void) {
++    // The game's own answer to "may I vibrate": it decides whether the game plays its vibration at all. The answer
++    // and every change of it are printed, so that "no vibration" can be told apart from "the game was told that it
++    // may not vibrate".
++    static int last = -1; static unsigned calls;
++    int ok = dm_haptics_available() != 0;
++    if (ok != last || ++calls % 64 == 0) { last = ok;
++        LOG("[dm] haptics: the game asks whether it may vibrate; the answer is %d", ok); }
++    return (unsigned)ok; }
+ HLE_FORCE("_ZN2nn3hid25GetVibrationDeviceHandlesEPNS0_21VibrationDeviceHandleEiRKjNS_4util10BitFlagSetILi32ENS0_12NpadStyleTagEEE", "vibration devices of the connected controller",
+           int, h_hid_VibHandles, uint32_t *h, int n, const uint32_t *id, uint32_t style) {
+     if (!h || !id || n <= 0 || !(style & style_of(*id))) return 0;

@@ -1,0 +1,54 @@
+diff --git a/dm/games/01007EF00011E000/patches.py b/dm/games/01007EF00011E000/patches.py
+--- a/dm/games/01007EF00011E000/patches.py
++++ b/dm/games/01007EF00011E000/patches.py
+@@ -95,4 +95,50 @@
+     emit(B(here(), 0x1266880)); emit(B(here(), 0x1266950))   # apply the host's scale; skip: the original branch
+     fs_put(0x126686c, [B(0x126686c, start)], 'scale apply block taken every frame when the host render scale is not 1.0')
+ 
++    # Output size (OUTPUT_W / OUTPUT_H: state +0x40 u64 width | height << 32 and +0x48 float width, written by the loader; 0 = the game's own 1920x1080). Ported from upstream
++    # PR #76. Docked, the game composes each frame into 1920x1080 display buffers whatever its 3D views render at, so the picture itself was 16:9 and the phone's 19:5 screen kept
++    # black bars at the sides. The size is a global (main+0x1e43dc0, set at three guarded inits, from which the window and its display buffers are made); the docked mode
++    # (main+0x12660bc) sets the output width (+0x1210, the divisor of the view scale above, so the 3D views keep the render scale x the docked base width 1600 at +0x1214), the
++    # system's render size (main+0x106dc70) and the window crop (main+0xe9af58). All four take the host's size; the handheld mode keeps 1280x720. Each stub only rewrites the
++    # register the site is setting (x4 at the crop holds the height, set just before)
++    for site in (0xc61ef4, 0xc61f28, 0x12618c4):
++        fs_site(site, '0987c0f2')
++        start = here(); emit(ADRP(9, here(), FS_STATE_OFF))
++        for w in (0xf9402129,   # ldr x9,[x9,#0x40]      the host's size
++                  0xb5000069,   # cbnz x9,+3
++                  0xd280f009,   # mov x9,#0x780          the game's 1920x1080
++                  0xf2c08709):  # movk x9,#0x438,lsl #32
++            emit(w)
++        emit(B(here(), site + 4))
++        fs_put(site, [B(site, start)], 'output size global = the host\'s (state page +0x40; 0 = 1920x1080)')
++    fs_site(0x12660cc, '680a09f9'); fs_site(0x12660d4, '0887c0f2'); fs_site(0x1266104, '03f08052')
++    start = here()
++    emit(0xf9090a68)            # str x8,[x19,#0x1210]   the game's widths (1920.0, base 1600.0)
++    emit(ADRP(8, here(), FS_STATE_OFF))
++    for w in (0xb9404908,       # ldr w8,[x8,#0x48]      the host's width (float)
++              0x34000048,       # cbz w8,+2
++              0xb9121268):      # str w8,[x19,#0x1210]
++        emit(w)
++    emit(B(here(), 0x12660d0))
++    fs_put(0x12660cc, [B(0x12660cc, start)], 'docked output width = the host\'s (state page +0x48; 0 = 1920.0)')
++    start = here(); emit(ADRP(8, here(), FS_STATE_OFF))
++    for w in (0xf9402108,       # ldr x8,[x8,#0x40]
++              0xb5000068,       # cbnz x8,+3
++              0xd280f008,       # mov x8,#0x780
++              0xf2c08708):      # movk x8,#0x438,lsl #32
++        emit(w)
++    emit(B(here(), 0x12660d8))
++    fs_put(0x12660d4, [B(0x12660d4, start)], 'docked render size = the host\'s output size')
++    start = here(); emit(ADRP(3, here(), FS_STATE_OFF))
++    for w in (0xf9402063,       # ldr x3,[x3,#0x40]
++              0xb4000083,       # cbz x3,+4
++              0xd360fc64,       # lsr x4,x3,#32          height
++              0x2a0303e3):      # mov w3,w3              width
++        emit(w)
++    emit(B(here(), 0x1266108))
++    emit(0x5280f003)            # mov w3,#0x780          the game's crop
++    emit(B(here(), 0x1266108))
++    fs_put(0x1266104, [B(0x1266104, start)], 'docked window crop = the host\'s output size')
++    ctx.keys.update(OUTPUT_W='0x780', OUTPUT_H='0x438')   # the game's own docked output size: 1920x1080
++
+ FRAME_STEP = {'cd57b23fa4bbad65803d9788c01821ee': frame_step}

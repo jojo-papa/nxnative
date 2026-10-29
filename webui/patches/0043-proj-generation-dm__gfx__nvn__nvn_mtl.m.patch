@@ -1,0 +1,92 @@
+diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
+--- a/dm/gfx/nvn/nvn_mtl.m
++++ b/dm/gfx/nvn/nvn_mtl.m
+@@ -1073,10 +1073,14 @@
+     uint64_t addr; uint64_t frame; int n;                                  // the projections that are corrected
+     uint64_t slot[PROJ_SLOTS_MAX]; uint8_t col[PROJ_SLOTS_MAX]; uint8_t kind[PROJ_SLOTS_MAX];
+     int ncand; uint64_t cand[PROJ_CAND_MAX]; uint8_t cand_col[PROJ_CAND_MAX]; uint8_t cand_kind[PROJ_CAND_MAX];   // what the buffer holds, for the log
+-    uint64_t log_frame;
++    uint64_t log_frame; uint64_t miss;   // how many times the scan found nothing in this buffer
+ } proj_buf;
+ static proj_buf g_proj_buf[PROJ_MAX]; static int g_proj_nbuf;
+ static uint64_t g_proj_shadow_n, g_proj_shadow_logged;
++// How many matrices the correction has been given, and of which kind: 0 = the game's own, 1 = corrected once,
++// 2 = corrected twice, 3 = not the camera's matrix at all.  The counters are the pulse of the picture: a picture that
++// jumps has a number of matrices that are not the camera's, or a number that goes up and down between the generations.
++static _Atomic uint64_t g_proj_gen_n[4]; static uint64_t g_proj_gen_logged;
+ // DM_PROJ_ORTHO=0 leaves the orthographic projection of a 2D layer alone (only a camera's perspective is corrected).
+ static int proj_ortho_on(void) { static int v = -1; if (v < 0) { const char *e = getenv("DM_PROJ_ORTHO"); v = e ? atoi(e) != 0 : 1; } return v; }
+ // DM_PROJ_2D=1 corrects the interface's own transform as well.  The menus and the text are drawn with a transform of
+@@ -1251,6 +1255,15 @@
+     const float *f = (const float *)addr;
+     uint64_t n = size / 16; if (n < 4) return;
+     uint64_t frame = atomic_load(&g_cur_frame);
++    // The counters of the generations, one line now and then.  They show whether the camera's matrix is recognized
++    // every time it is used, which is what a picture that jumps in width does not do.
++    if (frame - g_proj_gen_logged >= 300) {
++        g_proj_gen_logged = frame;
++        MLOG("DM_PROJ_WIDEN: the camera's matrices seen: the game's own %llu, corrected once %llu, corrected twice %llu, not the camera's %llu",
++             (unsigned long long)atomic_load(&g_proj_gen_n[0]), (unsigned long long)atomic_load(&g_proj_gen_n[1]),
++             (unsigned long long)atomic_load(&g_proj_gen_n[2]), (unsigned long long)atomic_load(&g_proj_gen_n[3]));
++        for (int i = 0; i < 4; i++) atomic_store(&g_proj_gen_n[i], 0);
++    }
+     int known = -1;
+     for (int i = 0; i < g_proj_nbuf; i++) if (g_proj_buf[i].addr == addr) { known = i; break; }
+     if (known >= 0 && frame - g_proj_buf[known].frame < 60) return;   // not on every draw: look again later
+@@ -1261,6 +1274,21 @@
+     if (known >= 0) {
+         if (proj_same(&g_proj_buf[known], &b)) { g_proj_buf[known].frame = frame; proj_dump_buf(addr, size); return; }
+         uint64_t lf = g_proj_buf[known].log_frame;   // a new result does not reset the rate limit of the log
++        if (!b.n && !b.ncand && g_proj_buf[known].n) {
++            // The scan found nothing at all in a buffer that held the camera's matrix a moment ago.  The buffer was
++            // most likely read while the game was writing it, so the aspect of a half written matrix is none of the
++            // three generations and the scan sees nothing.  The matrices that were found before are kept: the
++            // correction reads the bytes again for every draw and leaves a matrix alone whose aspect is not one of
++            // the generations, so keeping them cannot change a matrix that is not the camera's.  Throwing them away
++            // instead would take the camera's correction away for up to a second, and the picture would jump in width
++            // while it is away.
++            g_proj_buf[known].frame = frame;
++            g_proj_buf[known].miss++;
++            if (g_proj_buf[known].miss == 1 || g_proj_buf[known].miss % 8 == 0)
++                MLOG("DM_PROJ_WIDEN: the uniform buffer at %#llx holds no matrix of the picture's shape (the scan missed %llu times): the camera's correction is kept",
++                     (unsigned long long)addr, (unsigned long long)g_proj_buf[known].miss);
++            return;
++        }
+         g_proj_buf[known] = b;
+         g_proj_buf[known].log_frame = lf;
+     } else {
+@@ -1299,11 +1327,16 @@
+ // would jump by the factor the scale is.  The aspect of the bytes says which one it is.
+ static float proj_correction(const float *m) {
+     double xs = fabs((double)m[0]), ys = fabs((double)m[5]);   // the x and y scales, in row-major and column-major alike
+-    if (!(xs > 1e-9) || !(ys > 1e-9)) return g_proj_scale;     // the matrix is not readable here: the old way
++    if (!(xs > 1e-9) || !(ys > 1e-9)) return 1.0f;             // the matrix cannot be read: leave it alone
+     int gen = proj_gen_of(ys / xs);
++    atomic_fetch_add_explicit(&g_proj_gen_n[gen < 0 ? 3 : gen], 1, memory_order_relaxed);
+     if (gen == 1) return 1.0f;                    // the host's own correction: nothing to do
+     if (gen == 2) return 1.0f / g_proj_scale;     // corrected twice: put it back where it belongs
+-    return g_proj_scale;                          // the game's own matrix: correct it
++    if (gen == 0) return g_proj_scale;            // the game's own matrix: correct it
++    // The aspect is not one of the three generations: this is not the camera's matrix any more (the game wrote
++    // something else there, or the buffer was read while it was being written).  Scaling it would change a matrix that
++    // is not the camera's, and the picture would jump.  Leave it alone.
++    return 1.0f;
+ }
+ static void proj_scale_upload(uint8_t *ring, uint64_t dst, uint64_t n) {
+     if (g_proj_scale == 1.0f || !g_proj_nbuf) return;
+@@ -1319,6 +1352,7 @@
+                     int gen = proj_2d_gen(fabs((double)*(const float *)(ring + (base - dst))), &own);
+                     if (gen == 1) f = 1.0f;                    // the host's own correction: nothing to do
+                     else if (gen == 2) f = 1.0f / g_proj_scale; // corrected twice: put it back where it belongs
++                    else if (gen < 0) f = 1.0f;                // not the interface's own transform: leave it alone
+                 }
+             } else if (base >= dst && base + 24 <= dst + n) f = proj_correction((const float *)(ring + (base - dst)));
+             if (f == 1.0f) continue;                    // the bytes carry the correction already
+@@ -1361,6 +1395,7 @@
+                 int gen = proj_2d_gen(fabs((double)*(const float *)base), &own);
+                 if (gen == 1) f = 1.0f;
+                 else if (gen == 2) f = 1.0f / g_proj_scale;
++                else if (gen < 0) f = 1.0f;
+             } else if (base + 24 <= addr + need) f = proj_correction((const float *)base);   // the game's own bytes: what generation are they
+             if (f == 1.0f) continue;
+             for (int j = 0; j < 4; j++) {

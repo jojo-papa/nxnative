@@ -1,0 +1,57 @@
+diff --git a/dm/ios/Sources/front_ios.m b/dm/ios/Sources/front_ios.m
+--- a/dm/ios/Sources/front_ios.m
++++ b/dm/ios/Sources/front_ios.m
+@@ -50,6 +50,18 @@
+ @class DmChromeBar;
+ 
+ static BOOL env_on(const char *name, int fallback) { const char *e = getenv(name); return e ? atoi(e) != 0 : fallback != 0; }
++// DM_SCREEN_FILL: how the game picture fills the screen. 0 = fit (the default): the picture keeps its aspect
++// ratio and the bars around it stay black; 1 = cover: the picture is scaled up until the screen is covered (the
++// edges are cut off); 2 = stretch: the picture fills the screen without keeping its aspect ratio. nvn_mtl.m reads
++// the same variable and scales the picture into the canvas: the canvas must have the screen's shape in the two
++// latter modes, or the bars would appear twice (once around the canvas, once inside it).
++static int dm_screen_fill_mode(void) {
++    const char *e = getenv("DM_SCREEN_FILL");
++    if (!e || !*e) return 0;
++    if (!strcmp(e, "cover") || !strcmp(e, "1")) return 1;
++    if (!strcmp(e, "stretch")) return 2;
++    return 0;
++}
+ void dm_audio_set_user_gain(float g);   // hle_audio.c: the slider's gain, on top of the game's own output gain
+ void mtl_grab_next_present(void (^cb)(CGImageRef img));   // nvn_mtl.m: the next presented frame as an image
+ 
+@@ -69,6 +81,7 @@
+     dm_letterbox L;
+     CGFloat w = b.size.width, h = b.size.height, gw = w, gh = h;
+     if (w / h > 16.0 / 9.0) gw = h * 16.0 / 9.0; else gh = w * 9.0 / 16.0;
++    if (dm_screen_fill_mode()) { gw = w; gh = h; }   // DM_SCREEN_FILL: the picture covers the whole screen (there are no bars)
+     L.game = CGRectMake(floor((w - gw) / 2), floor((h - gh) / 2), floor(gw), floor(gh));
+     CGFloat gy = CGRectGetMinY(L.game), gb = CGRectGetMaxY(L.game), gx = CGRectGetMinX(L.game), gr = CGRectGetMaxX(L.game);
+     L.top = CGRectMake(0, 0, w, gy);
+@@ -332,7 +345,7 @@
+ // not, the picture is taken from the presenter instead, every third tick, so the readback does not cost
+ // the game its frame rate.
+ - (void)chrome_tick {
+-    if (!g_reflection || !self.game) return;
++    if (!g_reflection || !self.game || g_reflection.hidden) return;   // hidden: there are no bars to mirror into (DM_SCREEN_FILL)
+     id c = ((CALayer *)self.game.layer).contents;
+     if (c) { g_reflection.contents = c; g_reflect_ticks = 0; return; }
+     if (g_reflect_ticks++ % 3) return;
+@@ -383,7 +396,16 @@
+     CGRect b = self.view.bounds, safe = UIEdgeInsetsInsetRect(b, self.view.safeAreaInsets);
+     CGFloat u = MIN(b.size.height / 430.0, 1.3), mid = b.size.width / 2, pad = 8;
+     BOOL slider = env_on("DM_VOLUME", 1);
+-    if (L.top.size.height >= 56) {
++    if (dm_screen_fill_mode()) {
++        // No bars (the picture covers the screen): the row of buttons goes over the picture, in the free stretch of
++        // the pad's top row (between the centre cluster and R3), the same place as in the top-bar case.
++        CGFloat x0 = mid + 77 * u + pad, x1 = b.size.width - 119 * u - pad;
++        if (x1 - x0 < 150) { x0 = 119 * u + pad; x1 = mid - 77 * u - pad; }
++        if (x1 - x0 < 150) { x0 = pad; x1 = b.size.width - pad; }
++        CGFloat h = slider ? 64 : 32;
++        self.chrome.frame = CGRectMake(x0, CGRectGetMinY(safe) + 2, x1 - x0, h);
++        [self.chrome arrange:self.chrome.bounds vertical:NO slider:(slider && h >= 64)];
++    } else if (L.top.size.height >= 56) {
+         CGFloat x0 = mid + 77 * u + pad, x1 = b.size.width - 119 * u - pad;
+         if (x1 - x0 < 150) { x0 = 119 * u + pad; x1 = mid - 77 * u - pad; }
+         if (x1 - x0 < 150) { x0 = pad; x1 = b.size.width - pad; }

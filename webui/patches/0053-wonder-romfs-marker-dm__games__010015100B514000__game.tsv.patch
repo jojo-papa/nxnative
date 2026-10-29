@@ -1,0 +1,12 @@
+diff --git a/dm/games/010015100B514000/game.tsv b/dm/games/010015100B514000/game.tsv
+--- a/dm/games/010015100B514000/game.tsv
++++ b/dm/games/010015100B514000/game.tsv
+@@ -26,7 +26,7 @@
+ # code modules rewritten and loaded (load order; rtld is replaced by the host)
+ modules	main sdk
+ # a path that must exist in the RomFS (tells whether the game files are in the right place)
+-romfs_marker	System/Resource
++romfs_marker	System/RegionLangMask.txt
+ # extensions zip stores without compressing (already compressed)
+ zip_store	.zs:.bwav:.metallib
+ 

@@ -1,0 +1,30 @@
+diff --git a/dm/gfx/tools/shader_split.py b/dm/gfx/tools/shader_split.py
+--- a/dm/gfx/tools/shader_split.py
++++ b/dm/gfx/tools/shader_split.py
+@@ -42,7 +42,7 @@
+ #   With an update: give RomFS and main as comma-separated lists (base game first, e.g. data/v0/RomFS,data/v327680/RomFS); the output is the union of both versions (see main())
+ #   Unity type trees need Unity's common string table, which is taken from the first main
+ # Pair table: (vertex key, pixel key) of every BNSH variation (every Unity program); dmsh_build uses it to give vertex shaders the outputs their pixel shaders read but they do not write (see dmsh_build.py vs_pad)
+-import collections, concurrent.futures as cf, hashlib, json, os, re, struct, subprocess, sys
++import collections, concurrent.futures as cf, hashlib, json, os, re, shutil, struct, subprocess, sys
+ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../games')); import game as _game
+ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__))); import uepak
+ GAME = _game.load()   # the current game profile (DM_GAME, required): source group rules and the table header note
+@@ -1320,12 +1320,15 @@
+     return {struct.unpack_from('<I', m, 4)[0]: m for _, m in sarc_members(d) if m[:4] == bytes.fromhex('37a430ec')}
+ 
+ def unzs(path):
+-    """A zstd file decompressed: frames without a dictionary through the zstd command as before, frames that name one with that dictionary from ZDICTS"""
++    """A zstd file decompressed: frames without a dictionary through the zstd command when the machine has one, else through the zstd module (Nintendo Switch Sports' RomFS holds 10,751 .zs files and the build machine has no zstd command); frames that name one with that dictionary from ZDICTS"""
+     d = open(path, 'rb').read()
+     fhd = d[4] if len(d) > 5 and d[:4] == bytes.fromhex('28b52ffd') else 0
+     n, o = (0, 1, 2, 4)[fhd & 3], 6 - (fhd >> 5 & 1)   # dictionary ID size; it follows the window descriptor, which single-segment frames omit
+     did = int.from_bytes(d[o:o + n], 'little')
+-    if not did: return subprocess.run(['zstd', '-d', '-c', '-q', path], capture_output=True, check=True).stdout
++    if not did:
++        exe = shutil.which('zstd')
++        if exe: return subprocess.run([exe, '-d', '-c', '-q', path], capture_output=True, check=True).stdout
++        return zstd_mod().decompress(d)
+     zstd = zstd_mod()
+     if did not in ZDICTS: red(f'{path}: a frame needs zstd dictionary {did}, which Pack/ZsDic.pack.zs does not have')
+     if did not in _ZD: _ZD[did] = zstd.ZstdDict(ZDICTS[did])

@@ -12,9 +12,9 @@ app_category	public.app-category.action-games
 pad_layout	full
 
 # ---- Versions ----
-build	v393216	1.4.1	main=b424be150a8e7d78701cbe7a439d9ebf	subsdk0=93ff8252d975adf07230cb86c83301c5	sdk=fcf93a41b08c5193a1410d262602dc62
-package	v393216
-shader_versions	v393216
+build	v262144	1.3.0	main=b424be150a8e7d78701cbe7a439d9ebf	subsdk0=93ff8252d975adf07230cb86c83301c5	sdk=fcf93a41b08c5193a1410d262602dc62
+package	v262144
+shader_versions	v262144
 
 # ---- Files ----
 modules	main subsdk0 sdk

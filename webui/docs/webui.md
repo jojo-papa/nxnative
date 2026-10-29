@@ -35,6 +35,12 @@ The preparer installs Python dependencies, builds the LibHac extractor, and writ
 
 Windows uses `webui/build/windows/build_ipa_windows.py`. It requires one shader version matching the packaged version and rejects games whose extracted sources require Vulkan, runtime shader capture, Unreal decoding, or Oodle capture. Graphics requirements are detected from the extracted game, not guessed from its name. macOS uses the existing NSP pipeline and its capture support.
 
+### Windows shader chain version
+
+The Windows shader build does not reuse the repository's Mac translation chain. `webui/build/windows/windows_shader_build.py` materializes an isolated chain tree in the task folder, rewrites the tool paths for Metal, SPIRV-Cross and .NET, and writes a tool lock of its own, so the chain version differs from the one in `dm/gfx/nvn/dmsh_chain.h`. The host must be compiled with the Windows version: the builder copies the generated header into the task profile as `dmsh_chain.h` and hands it to `ios_cross_compile.py`, which compiles a source that includes the chain version header from a shadow copy carrying it. The upstream sources, the repository's chain header and its lock are never modified, and the packed library directory is named after the same version, so the app loads the libraries the build made.
+
+The Windows cross-toolchain is newer than Apple's clang and promotes `-Wincompatible-pointer-types` to an error. The sources rely on Apple's behavior (a warning), so the Windows builder disables that diagnostic to match it.
+
 A title ID without a registered profile is surveyed from the base game and the newest supplied update, then built from a provisional profile in the task folder. This mirrors the upstream `scripts/build_ipa_from_nsp.py` fallback: the profile values are guessed from the game files and the resulting app may not boot. The task publishes `provisional.json` and `provisional-profile.tsv`, and the profile is never written into `dm/games`. Windows applies the same offline NVN restrictions to provisional builds; a game needing Mac capture is rejected with the reason. Inspection works without a profile and does not need this fallback.
 
 The header language selector switches between Simplified Chinese and English and remembers the choice in this browser. This affects only the WebUI; game language is a separate launch setting. Build-tool logs remain unchanged.
@@ -127,6 +133,23 @@ Build and conversion tasks show a stage-weighted progress bar in the task list, 
 **Output folder** in Environment & tools optionally copies finished artifacts out of the task data: the IPA, macOS `.app.zip`, separate RomFS archive and their `.sha256` files, plus converted NSPs from conversion tasks. Same-named files are overwritten by later builds; the task's own `outputs/` directory and its download links remain. Leave the setting empty to keep files only in the task data folder.
 
 Keys are never published as artifacts. Uploaded keys stay in the data folder and appear in **Previously uploaded files**; the newest saved key is selected automatically for later tasks. Delete a saved key from the upload history when it should no longer be stored. Private task copies are removed after completion/cancellation unless explicitly retained, which keeps a retry working even if the saved upload is deleted. Original files imported by path are never deleted. Logs contain file paths and tool output, so keep the data directory private to your OS account.
+
+## Sideloading the IPA (Windows)
+
+The Windows IPA is **unsigned**: the packer writes no `_CodeSignature/` and no `embedded.mobileprovision`, and it strips the signature of any input it reuses. That matches the upstream macOS packer, which skips the same two paths. Sideloading tools re-sign the app with the user's own Apple ID, so an unsigned IPA is the expected input.
+
+iOS caps a sideloaded app's memory at roughly 3.4 GB unless the app is signed with the **Increased Memory Limit** entitlement (`com.apple.developer.kernel.increased-memory-limit`). A recent iPhone then allows about 6 GB. The upstream README lists the titles that iOS closes without it (Hyrule Warriors: Age of Calamity and Hades II exceed it; Breath of the Wild and Cuphead come close); other titles, including Super Mario Odyssey, are expected to run inside the default budget.
+
+Which tool grants the capability matters:
+
+- **AltStore Classic 2.2 or newer** sends the `INCREASED_MEMORY_LIMIT` capability request for every team type when it updates the App ID, so a free Apple ID can get the entitlement. This is the only mainstream tool that does it on its own.
+- **GetMoreRam** (`hugeBlack/GetMoreRam`, a StosSign wrapper) does it explicitly: sideload it, sign in with the same Apple ID that signed the game, open **App IDs**, refresh, pick the game's App ID, tap **Add Increased Memory Limit**, then reinstall the game so the new profile carries the entitlement. It works with any signer, including Sideloadly.
+- **SideStore** drops the entitlement for free accounts (SideStore/SideStore#1616): its signing code has the entitlement in the free list but never enables the capability on the App ID. The fix in SideStore/SideSign#4 is not merged, so use GetMoreRam with SideStore rather than SideStore alone.
+- **Sideloadly** has no memory-limit option in its documented advanced options, so pair it with GetMoreRam.
+
+A free Apple ID is enough for all of this. It signs three apps per device, allows ten App IDs per week, and the provisioning profile expires every seven days, so the app needs a refresh before it stops launching. Back up `save/` before a re-sign, because the data directory is not carried over.
+
+The device must report `MTLGPUFamilyMetal4`. The runtime checks it and stops otherwise, so an older iPhone or iPad cannot run these builds at all.
 
 ## Validation
 

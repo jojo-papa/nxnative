@@ -1,0 +1,35 @@
+diff --git a/dm/ios/Sources/front_ios.m b/dm/ios/Sources/front_ios.m
+--- a/dm/ios/Sources/front_ios.m
++++ b/dm/ios/Sources/front_ios.m
+@@ -30,8 +30,10 @@
+     if (g_wide < 0) { const char *e = getenv("DM_ASPECT"); g_wide = DM_GAME_ASPECT_ANY && !(e && !strcmp(e, "16:9")); }
+     return g_wide;
+ }
++static int dm_screen_fill_mode(void);   // further down, with the chrome
+ double front_ios_canvas_aspect(CGSize b) {   // DmGamepad.m maps touches on the same canvas
+     double a = b.width > 0 && b.height > 0 ? fmax(b.width, b.height) / fmin(b.width, b.height) : 16.0 / 9.0;
++    if (dm_screen_fill_mode() == 2 || dm_screen_fill_mode() == 3) return a;   // the picture covers the whole screen
+     return front_ios_wide() ? fmax(a, 16.0 / 9.0) : 16.0 / 9.0;
+ }
+ double front_screen_aspect(void) { return front_ios_wide() ? g_canvas_aspect : 0; }   // set on the main thread before the host starts the game (startGame)
+@@ -67,14 +69,16 @@
+ static BOOL env_on(const char *name, int fallback) { const char *e = getenv(name); return e ? atoi(e) != 0 : fallback != 0; }
+ // DM_SCREEN_FILL: how the game picture fills the screen. 0 = fit (the default): the picture keeps its aspect
+ // ratio and the bars around it stay black; 1 = cover: the picture is scaled up until the screen is covered (the
+-// edges are cut off); 2 = stretch: the picture fills the screen without keeping its aspect ratio. nvn_mtl.m reads
+-// the same variable and scales the picture into the canvas: the canvas must have the screen's shape in the two
+-// latter modes, or the bars would appear twice (once around the canvas, once inside it).
++// edges are cut off); 2 = stretch: the picture fills the screen without keeping its aspect ratio; 3 = wide: the
++// picture fills the screen and the game's horizontal field of view is widened to match, so the picture keeps its
++// proportions. nvn_mtl.m reads the same variable and scales the picture into the canvas: the canvas must have the
++// screen's shape in the latter modes, or the bars would appear twice (once around the canvas, once inside it).
+ static int dm_screen_fill_mode(void) {
+     const char *e = getenv("DM_SCREEN_FILL");
+     if (!e || !*e) return 0;
+     if (!strcmp(e, "cover") || !strcmp(e, "1")) return 1;
+-    if (!strcmp(e, "stretch")) return 2;
++    if (!strcmp(e, "stretch") || !strcmp(e, "2")) return 2;
++    if (!strcmp(e, "wide") || !strcmp(e, "3")) return 3;
+     return 0;
+ }
+ void dm_audio_set_user_gain(float g);   // hle_audio.c: the slider's gain, on top of the game's own output gain

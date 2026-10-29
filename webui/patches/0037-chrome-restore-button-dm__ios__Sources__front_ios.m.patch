@@ -1,0 +1,65 @@
+diff --git a/dm/ios/Sources/front_ios.m b/dm/ios/Sources/front_ios.m
+--- a/dm/ios/Sources/front_ios.m
++++ b/dm/ios/Sources/front_ios.m
+@@ -214,6 +214,7 @@
+ @property (nonatomic, strong) UIView *pad;
+ @property (nonatomic, strong) UILabel *fps;
+ @property (nonatomic, strong) DmChromeBar *chrome;
++@property (nonatomic, strong) UIButton *restore;   // the small button that brings the hidden chrome back
+ @property (nonatomic) BOOL launched;
+ - (void)startGame;
+ - (void)build_chrome;
+@@ -304,6 +305,9 @@
+         CGRect s = UIEdgeInsetsInsetRect(b, self.view.safeAreaInsets); CGFloat u = MIN(b.size.height / 430.0, 1.3);
+         self.fps.frame = CGRectMake(floor(CGRectGetMinX(s) + 130 * u), floor(CGRectGetMinY(s) + 22 * u - 11), 64, 22);
+     }
++    if (self.restore) {   // the same corner the chrome's own buttons are in
++        self.restore.frame = CGRectMake(CGRectGetMaxX(L.game) - 92, CGRectGetMinY(L.game) + 8, 84, 30);
++    }
+ }
+ - (void)viewDidAppear:(BOOL)a {
+     [super viewDidAppear:a];
+@@ -357,6 +361,20 @@
+     g_toast.layer.cornerRadius = 10; g_toast.layer.masksToBounds = YES;
+     g_toast.alpha = 0; g_toast.userInteractionEnabled = NO;
+     [self.view addSubview:g_toast];
++    // The button that brings the hidden chrome back: the chrome's own hide button goes away with it,
++    // so without this there would be no way back.
++    UIButton *restore = [UIButton buttonWithType:UIButtonTypeSystem];
++    [restore setTitle:@"显示界面" forState:UIControlStateNormal];
++    [restore setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
++    restore.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
++    restore.backgroundColor = [UIColor colorWithRed:0.12 green:0.32 blue:0.82 alpha:0.55];
++    restore.layer.borderWidth = 1;
++    restore.layer.borderColor = [UIColor colorWithRed:0.42 green:0.68 blue:1.00 alpha:0.95].CGColor;
++    restore.layer.cornerRadius = 8; restore.layer.masksToBounds = YES;
++    restore.hidden = YES;
++    [restore addTarget:self action:@selector(restoreChrome) forControlEvents:UIControlEventTouchUpInside];
++    [self.view addSubview:restore];
++    self.restore = restore;
+     if (!g_reflect_link) {
+         g_reflect_link = [CADisplayLink displayLinkWithTarget:self selector:@selector(chrome_tick)];
+         g_reflect_link.preferredFrameRateRange = CAFrameRateRangeMake(10, 30, 30);   // the reflection does not need the full frame rate
+@@ -407,10 +425,18 @@
+         g_chrome_hidden = !g_chrome_hidden;
+         if (g_chrome) g_chrome.hidden = g_chrome_hidden;
+         if (g_chrome_layer) g_chrome_layer.hidden = g_chrome_hidden;
+-        chrome_toast(g_chrome_hidden ? @"已隐藏界面" : @"已显示界面");
+-    }
+-}
+-
++        if (self.restore) self.restore.hidden = !g_chrome_hidden;
++        chrome_toast(g_chrome_hidden ? @"已隐藏界面（点右上角的「显示界面」恢复）" : @"已显示界面");
++    } else if ([what isEqualToString:@"show"]) {
++        g_chrome_hidden = NO;
++        if (g_chrome) g_chrome.hidden = NO;
++        if (g_chrome_layer) g_chrome_layer.hidden = NO;
++        if (self.restore) self.restore.hidden = YES;
++        chrome_toast(@"已显示界面");
++    }
++}
++
++- (void)restoreChrome { [self chrome_action:@"show"]; }
+ // Where the buttons go. The upper bar is shared with the virtual gamepad's top row: ZL / ZR in the
+ // corners, L3 / R3 inboard of them, the - / + keys and the layout button at the top centre (all in the
+ // gamepad's own unit u). The free stretch is between the centre cluster and R3; the frame-rate counter

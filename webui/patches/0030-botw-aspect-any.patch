@@ -1,0 +1,13 @@
+diff --git a/dm/games/01007EF00011E000/game.tsv b/dm/games/01007EF00011E000/game.tsv
+--- a/dm/games/01007EF00011E000/game.tsv
++++ b/dm/games/01007EF00011E000/game.tsv
+@@ -16,6 +16,9 @@
+ pad_layout	full
+ 
+ # ---- Graphics ----
++# The output size stubs in patches.py (OUTPUT_W / OUTPUT_H) let the host set the game's output size, so the game renders at the screen's aspect (the iPhone's 19:5):
++# the picture fills the screen edge to edge, with no bars, no crop and no stretch (loader.c output_aspect; the launcher's Picture switch, Wide by default)
++aspect	any
+ # The frame-interval controller (60 fps cuts in patches.py) and dynamic resolution read the GPU time between the frame's two timestamp reports: each report takes its segment's GPU start / end
+ gpu_timestamps	segment
+ # 60 fps (30 on the Switch): the host decides each frame's step in whole vsyncs and holds the frame that long (rewriter stubs at setWaitVsyncInterval and VFR::updateInterval,

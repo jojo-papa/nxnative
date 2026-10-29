@@ -1,0 +1,177 @@
+diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
+--- a/dm/gfx/nvn/nvn_mtl.m
++++ b/dm/gfx/nvn/nvn_mtl.m
+@@ -1050,6 +1050,104 @@
+ }
+ void mtl_ubp_stats(uint64_t *made, uint64_t *reused, uint64_t *refused) { *made = g_ubp_made; *reused = g_ubp_reused; *refused = g_ubp_refused; }
+ void mtl_ubp_why(uint64_t w[5]) { memcpy(w, g_ubp_why, sizeof g_ubp_why); }
++// DM_PROJ_WIDEN (used with DM_SCREEN_FILL=wide): the game's picture fills a screen that is not the game's own aspect. The
++// picture keeps its proportions because the game's horizontal field of view is widened by exactly the factor the picture is
++// stretched by (the vertical field of view stays): what the player sees is the picture a native render at the screen's aspect
++// would give, at the game's own resolution.
++// The projection is not in the binary: the game computes it and hands it to the vertex shader as four float4 rows in a
++// uniform buffer. It is found there by its perspective signature (the w row carries the -1 of the perspective, the first two
++// rows carry the x and y scales of the field of view, the off-diagonal terms are zero), and the aspect of those two scales has
++// to match the aspect of the game's own picture, which tells the camera's projection from a shadow map's.
++// The scaling is done on the host's own copy of the game's upload (the ring below), so the game and the GPU read the same
++// matrix, and every upload is scaled exactly once (the source is always the game's own bytes).
++static int dm_screen_fill_mode(void);   // further down, with the present
++static int proj_widen_on(void) { static int v = -1; if (v < 0) { const char *e = getenv("DM_PROJ_WIDEN"); v = e ? atoi(e) != 0 : dm_screen_fill_mode() == 3; if (v) MLOG("DM_PROJ_WIDEN: the horizontal field of view is widened, so the picture fills the screen without changing its proportions"); } return v; }
++static float g_proj_scale = 1.0f;      // the factor the row the vertex shader multiplies for clip.x is scaled by (1 = the picture is not stretched)
++static double g_proj_src_aspect;       // the aspect of the game's own picture (the source of the present)
++typedef struct { uint64_t addr; uint64_t slot; uint64_t frame; int col; int found; } proj_buf;   // a uniform buffer the vertex stage binds
++enum { PROJ_MAX = 64, PROJ_SCAN_SLOTS = 1024 };   // the first 16 KB of a buffer; the projection sits at the front of it
++static proj_buf g_proj_buf[PROJ_MAX]; static int g_proj_nbuf;
++// The perspective matrix at a slot of a uniform buffer: four consecutive float4 rows. Row-major, the w row is the last one
++// (its z is the -1 of the perspective); column-major, the -1 is the w component of the third row. The x and y scales are in
++// the first two rows in both layouts.
++static int proj_signature(const float *f, uint64_t slot, int col) {
++    const float *r0 = f + slot * 4, *r1 = r0 + 4, *r2 = r0 + 8, *r3 = r0 + 12;
++    if (fabsf(r0[1]) > 1e-2f || fabsf(r0[2]) > 1e-2f || fabsf(r0[3]) > 1e-2f || fabsf(r1[0]) > 1e-2f ||
++        fabsf(r1[2]) > 1e-2f || fabsf(r1[3]) > 1e-2f || fabsf(r2[0]) > 1e-2f || fabsf(r2[1]) > 1e-2f) return 0;
++    float xs = fabsf(r0[0]), ys = fabsf(r1[1]);
++    if (!(xs > 0.3f && xs < 6.0f) || !(ys > 0.6f && ys < 4.0f)) return 0;
++    return col ? (r2[3] == -1.0f) : (r3[2] == -1.0f);
++}
++static int proj_scan(const float *f, uint64_t n, uint64_t *slot, int *col) {
++    if (n > PROJ_SCAN_SLOTS) n = PROJ_SCAN_SLOTS;
++    for (uint64_t k = 0; k + 3 < n; k++) {
++        const float *r0 = f + k * 4;
++        if (fabsf(r0[1]) > 1e-2f || fabsf(r0[2]) > 1e-2f || fabsf(r0[3]) > 1e-2f) continue;   // the first row: the x scale and nothing else
++        const float *r1 = r0 + 4, *r2 = r0 + 8, *r3 = r0 + 12;
++        if (fabsf(r1[0]) > 1e-2f || fabsf(r1[2]) > 1e-2f || fabsf(r1[3]) > 1e-2f || fabsf(r2[0]) > 1e-2f || fabsf(r2[1]) > 1e-2f) continue;
++        float xs = fabsf(r0[0]), ys = fabsf(r1[1]);
++        if (!(xs > 0.3f && xs < 6.0f) || !(ys > 0.6f && ys < 4.0f)) continue;
++        if (r3[2] == -1.0f) { *slot = k; *col = 0; return 1; }
++        if (r2[3] == -1.0f) { *slot = k; *col = 1; return 1; }
++    }
++    return 0;
++}
++// The camera's projection is the one whose aspect is the aspect of the game's own picture; a shadow map's is another one. A
++// matrix that was scaled already has an aspect that is off by the scale factor, and counts too.
++static int proj_aspect_ok(double a) {
++    double want = g_proj_src_aspect > 0.1 ? g_proj_src_aspect : 16.0 / 9.0;
++    if (fabs(a - want) < 0.08) return 1;
++    if (g_proj_scale != 1.0f && fabs(a - want / g_proj_scale) < 0.08) return 1;
++    return 0;
++}
++// Look for the projection in a uniform buffer the vertex stage binds. The same buffer is bound again for every draw, so a
++// buffer that holds the projection is only checked at its own slot (the content changes with the camera, the slot does not).
++// A buffer without a projection is looked at again only once a second: the scan must not cost anything per draw.
++static void proj_detect(uint64_t addr, uint64_t size) {
++    if (!size || size > (1u << 20)) return;
++    const float *f = (const float *)addr;
++    uint64_t n = size / 16; if (n < 4) return;
++    uint64_t frame = atomic_load(&g_cur_frame);
++    int known = -1;
++    for (int i = 0; i < g_proj_nbuf; i++) if (g_proj_buf[i].addr == addr) { known = i; break; }
++    if (known >= 0) {
++        if (g_proj_buf[known].found) {
++            if (proj_signature(f, g_proj_buf[known].slot, g_proj_buf[known].col)) return;   // still the projection
++            g_proj_buf[known].found = 0;
++        }
++        if (frame - g_proj_buf[known].frame < 60) return;   // not on every draw: look again later
++    }
++    uint64_t slot; int col;
++    int hit = proj_scan(f, n, &slot, &col);
++    if (hit) {
++        double a = (double)fabsf(f[(size_t)slot * 4 + 5]) / (double)fabsf(f[(size_t)slot * 4]);
++        if (!proj_aspect_ok(a)) hit = 0;
++    }
++    if (known >= 0) { g_proj_buf[known].frame = frame; if (hit) { g_proj_buf[known].slot = slot; g_proj_buf[known].col = col; g_proj_buf[known].found = 1; } return; }
++    if (g_proj_nbuf >= PROJ_MAX) return;
++    g_proj_buf[g_proj_nbuf++] = (proj_buf){addr, hit ? slot : 0, frame, hit ? col : 0, hit};
++    if (!hit) return;
++    const float *r0 = f + slot * 4;
++    MLOG("DM_PROJ_WIDEN: the projection is in the uniform buffer at %#llx, at the rows %llu to %llu (%s): (%g,%g,%g,%g) (%g,%g,%g,%g) (%g,%g,%g,%g) (%g,%g,%g,%g)",
++         (unsigned long long)addr, (unsigned long long)slot, (unsigned long long)(slot + 3), col ? "column-major" : "row-major",
++         r0[0], r0[1], r0[2], r0[3], r0[4], r0[5], r0[6], r0[7], r0[8], r0[9], r0[10], r0[11], r0[12], r0[13], r0[14], r0[15]);
++}
++// The host's copy of the game's upload: the row that the vertex shader multiplies for clip.x is scaled, which widens the
++// horizontal field of view by the factor the picture is stretched by. The game's own memory and the GPU read the same matrix.
++static void proj_scale_upload(uint8_t *ring, uint64_t dst, uint64_t n) {
++    if (g_proj_scale == 1.0f || !g_proj_nbuf) return;
++    for (int i = 0; i < g_proj_nbuf; i++) {
++        if (!g_proj_buf[i].found) continue;   // a buffer without a projection is left alone
++        uint64_t base = g_proj_buf[i].addr + g_proj_buf[i].slot * 16;
++        for (int j = 0; j < 4; j++) {
++            uint64_t fa = base + (g_proj_buf[i].col ? (uint64_t)j * 16 : (uint64_t)j * 4);   // the x scale of the row, or the x component of the column
++            if (fa + 4 <= dst || fa >= dst + n) continue;   // not in this upload
++            float *fp = (float *)(ring + (fa - dst));
++            *fp *= g_proj_scale;
++        }
++    }
++}
++
+ void mtl_sub_update(const void *data, uint64_t dst, uint64_t n) {
+     if (!n) return;
+     int pi = pend_add(dst, n, 1);
+@@ -1065,6 +1163,7 @@
+         res_add(g_ubs_buf); g_ubs_off = 0;
+     }
+     memcpy((uint8_t *)g_ubs_buf.contents + g_ubs_off, data, n);
++    proj_scale_upload((uint8_t *)g_ubs_buf.contents + g_ubs_off, dst, n);   // DM_PROJ_WIDEN: the host's own copy carries the widened projection
+     if (pi >= 0) { g_upd[g_nupd] = (upd_ent){dst, g_ubs_off, g_ubs_buf}; g_pend_upd[pi] = (uint16_t)++g_nupd; }
+     if (defer) {
+         // A deferred update this one covers whole never needs to land: the same landing writes these bytes after it, and the draws that read it hold its ring copy (ubd_shadow).
+@@ -4644,6 +4743,7 @@
+                 RED_ONCE(16, "stage %d cb%d has no uniform buffer bound", nvn_stage, reg); slots[aid] = zero_bank_gpu(); USE(zero_bank(), MTLResourceUsageRead); continue; }
+             uint64_t ul = cb_len(sh, reg, u->size);   // what the shader can read of it
+             if (proj_probe_on() && nvn_stage == 0) proj_probe(nvn_stage, reg, u->addr, u->size);
++            if (proj_widen_on() && nvn_stage == 0) proj_detect(u->addr, u->size);
+             if (g_nubd && ubd_hits(u->addr, u->addr + ul)) {   // inline updates deferred in this pass (see mtl_sub_update); ubd_conflict made sure they cover the binding or the rest can be read from memory
+                 uint64_t g; const uint8_t *c; if (ubd_covers(u->addr, u->addr + ul)) gpu = ubd_shadow(u->addr, u->addr + ul);
+                 else if (ubp_get(u->addr, u->addr + ul, &g, &c)) gpu = g;
+@@ -8173,15 +8273,32 @@
+ }
+ // DM_SCREEN_FILL: how the game picture fills the screen. 0 = fit (the default): the picture keeps its aspect
+ // ratio and the bars around it stay black; 1 = cover: the picture is scaled up until the screen is covered (the
+-// edges are cut off); 2 = stretch: the picture fills the screen without keeping its aspect ratio. nvn_mtl.m reads
+-// the same variable and scales the picture into the canvas: the canvas must have the screen's shape in the two
+-// latter modes, or the bars would appear twice (once around the canvas, once inside it).
++// edges are cut off); 2 = stretch: the picture fills the screen without keeping its aspect ratio; 3 = wide: the
++// picture fills the screen and the game's horizontal field of view is widened to match, so the picture keeps its
++// proportions (the same picture a native render at the screen's aspect would give). nvn_mtl.m reads the same
++// variable and scales the picture into the canvas: the canvas must have the screen's shape in the latter modes, or
++// the bars would appear twice (once around the canvas, once inside it).
+ static int dm_screen_fill_mode(void) {
+     const char *e = getenv("DM_SCREEN_FILL");
+     if (!e || !*e) return 0;
+     if (!strcmp(e, "cover") || !strcmp(e, "1")) return 1;
+-    if (!strcmp(e, "stretch")) return 2;
++    if (!strcmp(e, "stretch") || !strcmp(e, "2")) return 2;
++    if (!strcmp(e, "wide") || !strcmp(e, "3")) return 3;
+     return 0;
++}
++// DM_SCREEN_FILL=wide: the picture fills the canvas and the game's horizontal field of view is widened by the
++// factor the picture is stretched by, so it keeps its proportions. Until the projection has been found, the picture
++// is scaled up to cover the canvas (and cropped) instead, so it is never stretched wrongly.
++static void proj_wide_viewport(double dw, double dh, double cw, double ch, MTLViewport *vp) {
++    g_proj_src_aspect = cw / ch;
++    double k = (dw / dh) / g_proj_src_aspect;
++    if (proj_widen_on() && g_proj_nbuf && k > 0.01) {
++        g_proj_scale = (float)(1.0 / k);
++        vp->originX = 0; vp->originY = 0; vp->width = dw; vp->height = dh;
++        return;
++    }
++    double s = fmax(dw / cw, dh / ch);
++    vp->originX = floor((dw - cw * s) / 2); vp->originY = floor((dh - ch * s) / 2); vp->width = round(cw * s); vp->height = round(ch * s);
+ }
+ static int present_encode(id<MTLCommandBuffer> cb, id<MTLTexture> src, id<MTLTexture> dst, const int crop[4]) {
+     NSUInteger cx = 0, cy = 0, cw = src.width, ch = src.height;
+@@ -8208,6 +8325,7 @@
+         s = fmax(dw / cw, dh / ch);
+         vp = (MTLViewport){floor((dw - cw * s) / 2), floor((dh - ch * s) / 2), round(cw * s), round(ch * s), 0, 1};
+     } else if (fill == 2) vp = (MTLViewport){0, 0, dw, dh, 0, 1};   // stretch: the aspect ratio is not kept
++    else if (fill == 3) proj_wide_viewport(dw, dh, cw, ch, &vp);   // wide: the picture fills the canvas and the field of view is widened to match
+     int full = vp.originX == 0 && vp.originY == 0 && vp.width == dw && vp.height == dh;
+     static double last_vp[4];   // Log one line when the viewport changes (used by the real-device screen-level acceptance screen_check.py to check the aspect ratio)
+     if (memcmp(last_vp, &vp, sizeof last_vp)) { memcpy(last_vp, &vp, sizeof last_vp);
+@@ -8244,6 +8362,7 @@
+         s = fmax(dw / cw, dh / ch);
+         vp = (MTLViewport){floor((dw - cw * s) / 2), floor((dh - ch * s) / 2), round(cw * s), round(ch * s), 0, 1};
+     } else if (fill == 2) vp = (MTLViewport){0, 0, dw, dh, 0, 1};   // stretch: the aspect ratio is not kept
++    else if (fill == 3) proj_wide_viewport(dw, dh, cw, ch, &vp);   // wide: the picture fills the canvas and the field of view is widened to match
+     int full = vp.originX == 0 && vp.originY == 0 && vp.width == dw && vp.height == dh;
+     MTL4RenderPassDescriptor *rp = [MTL4RenderPassDescriptor new];
+     rp.colorAttachments[0].texture = dst;

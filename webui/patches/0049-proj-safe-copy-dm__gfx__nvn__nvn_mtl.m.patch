@@ -1,0 +1,45 @@
+diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
+--- a/dm/gfx/nvn/nvn_mtl.m
++++ b/dm/gfx/nvn/nvn_mtl.m
+@@ -1108,20 +1108,38 @@
+ // Look for the projection in a uniform buffer the vertex stage binds. The same buffer is bound again for every draw, so a
+ // buffer that holds the projection is only checked at its own slot (the content changes with the camera, the slot does not).
+ // A buffer without a projection is looked at again only once a second: the scan must not cost anything per draw.
++// The bytes of the guest memory at [addr, addr+len) into the caller's buffer: they may not all be there.  A uniform
++// buffer in a sparse pool whose pages are not all mapped has no host alias for the missing ones (reading the alias
++// stops the host with SIGBUS, as the texture path above says), and a binding that reaches past its pool ends in memory
++// that is not there at all.  The pages that are not there read as 0, which no projection matrix is made of.
++static void proj_copy(uint64_t addr, uint64_t len, void *dst) {
++    uint8_t *out = dst;
++    for (uint64_t o = 0; o < len; o += 0x1000) {
++        uint64_t chunk = len - o < 0x1000 ? len - o : 0x1000;
++        void *mb; uint64_t mo;
++        if (nvn_host_readable(addr + o, chunk) && mtl_addr(addr + o, chunk, &mb, &mo)) memcpy(out + o, (const uint8_t *)mb + mo, chunk);
++        else memset(out + o, 0, chunk);
++    }
++}
+ static void proj_detect(uint64_t addr, uint64_t size) {
+     if (!size || size > (1u << 20)) return;
+-    const float *f = (const float *)addr;
+-    uint64_t n = size / 16; if (n < 4) return;
++    uint64_t want = size < (PROJ_SCAN_SLOTS * 16) ? size : (PROJ_SCAN_SLOTS * 16);
++    uint64_t n = want / 16; if (n < 4) return;
+     uint64_t frame = atomic_load(&g_cur_frame);
+     int known = -1;
+     for (int i = 0; i < g_proj_nbuf; i++) if (g_proj_buf[i].addr == addr) { known = i; break; }
++    static float fbuf[PROJ_SCAN_SLOTS * 4];   // the bytes as they are read: the scan never touches the guest's memory
+     if (known >= 0) {
+         if (g_proj_buf[known].found) {
+-            if (proj_signature(f, g_proj_buf[known].slot, g_proj_buf[known].col)) return;   // still the projection
++            uint64_t lo = g_proj_buf[known].slot * 16; if (lo + 64 > want) lo = want > 64 ? want - 64 : 0;
++            proj_copy(addr + lo, 64, fbuf);
++            if (proj_signature(fbuf, 0, g_proj_buf[known].col)) return;   // still the projection
+             g_proj_buf[known].found = 0;
+         }
+         if (frame - g_proj_buf[known].frame < 60) return;   // not on every draw: look again later
+     }
++    proj_copy(addr, want, fbuf);
++    const float *f = fbuf;
+     uint64_t slot; int col;
+     int hit = proj_scan(f, n, &slot, &col);
+     if (hit) {

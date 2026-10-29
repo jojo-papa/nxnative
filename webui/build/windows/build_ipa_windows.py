@@ -24,7 +24,9 @@ PROD_KEYS = ''
 OUT_IPA = ''
 TOOL_DIR = ''
 METAL = ''
-JOBS = 12
+# A lower job count keeps the machine's memory and disk pressure down; the Metal
+# compiler is the bottleneck and fewer parallel jobs cost little build time.
+JOBS = 6
 
 
 def main():
@@ -32,6 +34,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument('folder', nargs='?', default=NSP_DIR)
     ap.add_argument('--game', default=GAME)
+    ap.add_argument('--version', default='', help='The version of the profile to build (the package version); the profile\'s own package version by default')
     ap.add_argument('--keys', type=Path, default=Path(PROD_KEYS) if PROD_KEYS else None)
     ap.add_argument('--out', type=Path, default=Path(OUT_IPA) if OUT_IPA else None)
     ap.add_argument('--tools', type=Path, default=Path(TOOL_DIR) if TOOL_DIR else None)
@@ -42,6 +45,7 @@ def main():
     ap.add_argument('--launch-defaults', type=Path)
     ap.add_argument('--separate-romfs', action='store_true', help='Leave the RomFS out of the IPA and write <ipa>.romfs.zip')
     ap.add_argument('--provisional', action='store_true', help='Build from a provisional profile (build IDs and shader evidence are generated from this extraction)')
+    ap.add_argument('--profile-dir', type=Path, help='Folder holding a provisional profile (the folder that holds <title ID>/game.tsv); overrides the DM_GAMES_DIR lookup')
     ap.add_argument('--font', type=Path, default=Path('C:/Windows/Fonts/msyh.ttc'))
     ap.add_argument('--letter-font', type=Path, default=Path('C:/Windows/Fonts/arialbd.ttf'))
     a = ap.parse_args()
@@ -55,6 +59,15 @@ def main():
     if not a.metal.is_file(): ap.error('Supply --metal with your installed Metal compiler')
     sys.path.insert(0, str(repo / 'dm/games'))
     import game
+    if a.profile_dir:
+        # dm/games/game.py splits DM_GAMES_DIR on ':', which cuts a Windows path in
+        # half at the drive letter ('E:\games' becomes ['E', '\games']).  The folder is
+        # taken directly instead, so a provisional profile outside the repository is found.
+        profiles = Path(a.profile_dir).resolve()
+        previous = game.extra_dirs
+        game.extra_dirs = lambda: [profiles] + previous()
+        os.environ['DM_GAMES_DIR'] = str(profiles)
+        print(f'Provisional profiles are searched in {profiles}', flush=True)
     nsps = sorted(folder.rglob('*.nsp'))
     ids = {}
     for p in nsps:
@@ -68,11 +81,16 @@ def main():
         original = candidates[0]
     else:
         ap.error('Specify --game with one existing game profile ID')
-    version = original.get('package')
+    version = a.version or original.get('package')
     if original.get('graphics', 'nvn') != 'nvn' or any(original.get(k, 'off') == 'on' for k in ('shader_glslc_capture', 'shader_vk_capture')):
         ap.error('This workflow needs an offline NVN profile without runtime shader capture')
+    if version not in original.builds():
+        ap.error(f'the profile has no build {version}: it has {", ".join(original.builds())}')
     if original.words('shader_versions') != [version]:
-        ap.error('This workflow currently requires one shader version matching package')
+        # A profile can register several versions (Super Mario Bros. Wonder has v0 and v327680): the shader
+        # evidence tables then hold the shaders of all of them, and the one that is built is one of them.
+        if version not in original.words('shader_versions'):
+            ap.error('This workflow currently requires one shader version matching package')
     bases = ids.get(original.title_id, [])
     updates = [p for p in ids.get(original.title_id + 0x800, []) if version.lower() in p.name.lower()]
     if len(bases) != 1 or (version != 'v0' and len(updates) != 1):
@@ -210,7 +228,14 @@ def main():
                             '--spirv-cross', tools / 'spirv-cross-build/spirv-cross.exe',
                             '--dotnet', tools / 'dotnet/dotnet.exe', '--cache-dir', tools / 'shader-cache', '--jobs', a.jobs],
         progress=shader_progress)
-    chain = re.search(r'#define DMSH_CHAIN "([a-f0-9]+)"', g.table('dmsh_chain.h').read_text())[1]
+    chain_header = windows / 'chain/gfx/nvn/dmsh_chain.h'
+    if not chain_header.is_file():
+        raise ValueError('The Windows shader build wrote no chain version header: ' + str(chain_header))
+    # The Windows shader chain has a version of its own (its tools are not the repository's Mac ones): the host
+    # must be compiled with it, and the packer takes the libraries of that version.
+    shutil.copyfile(chain_header, profile / 'dmsh_chain.h')
+    chain = re.search(r'#define DMSH_CHAIN "([a-f0-9]+)"', (profile / 'dmsh_chain.h').read_text())[1]
+    print(f'Windows shader chain version: {chain}', flush=True)
     run('c1_guard', [python, repo / 'dm/gfx/tools/c1_guard.py', windows / ('mac/b-' + chain), g.table('c1_full.tsv')])
     host = build / 'windows_host'
     clang = tools / 'ios-cross/toolchain/windows/iphone/bin/clang.exe'
@@ -227,7 +252,8 @@ def main():
         done = sum(1 for p in (host / 'objects').glob('*.o') if p.stat().st_mtime >= host_started - 5)
         return f'host_compile {done}/{host_total} sources'
     run('host_compile', [python, repo / 'webui/build/windows/ios_cross_compile.py', '--clang', clang, '--sdk', sdk,
-                         '--profile', profile, '--out', host, '--jobs', min(a.jobs, 8)], progress=host_progress)
+                         '--profile', profile, '--out', host, '--chain-header', chain_header,
+                         '--jobs', min(a.jobs, 8)], progress=host_progress)
     run('embed_generate', [python, repo / 'dm/ios/tools/gen_embed.py', patched, host / 'embed.S', *g.words('modules')], host / 'embed_link_flags.txt')
     run('embed_assemble', [clang, '-target', 'arm64-apple-ios26.0', '-isysroot', sdk, '-mcpu=apple-a16',
                            '-x', 'assembler', '-c', host / 'embed.S', '-o', host / 'embed.o'])

@@ -1,0 +1,27 @@
+diff --git a/dm/host/hle_audio.c b/dm/host/hle_audio.c
+--- a/dm/host/hle_audio.c
++++ b/dm/host/hle_audio.c
+@@ -176,7 +176,22 @@
+             const int16_t *s = (const int16_t *)bl->mBuffers[0].mData; uint32_t ns = bl->mBuffers[0].mDataByteSize / 2, i; int32_t pk = 0;
+             for (i = 0; i < ns; i++) { int32_t v = s[i] < 0 ? -s[i] : s[i]; if (v > pk) pk = v; }
+             uint32_t vb = atomic_load_explicit(&a->vol, memory_order_relaxed); float g; memcpy(&g, &vb, 4);
+-            LOG("[RED] audio probe #%d: nbuf=%u frames=%u bytes=%u peak=%d gain=%.6f", n, bl->mNumberBuffers, frames, bl->mBuffers[0].mDataByteSize, pk, g); } }
++            LOG("[RED] audio probe #%d: nbuf=%u frames=%u bytes=%u peak=%d gain=%.6f", n, bl->mNumberBuffers, frames, bl->mBuffers[0].mDataByteSize, pk, g); }
++        else {   // A level meter for the rest of the run: the peak of the PCM the device gets. A peak that stays at 0
++                 // means the game is not playing anything; a peak that moves while the speaker is silent means the
++                 // sound is lost on the way to the speaker (the system's own output volume).
++            static int ticks; static int32_t last_bucket = -1; static uint64_t last_log;
++            if (++ticks % 50 == 0) {
++                const int16_t *s = (const int16_t *)bl->mBuffers[0].mData; uint32_t ns = bl->mBuffers[0].mDataByteSize / 2, i; int32_t pk = 0;
++                for (i = 0; i < ns; i++) { int32_t v = s[i] < 0 ? -s[i] : s[i]; if (v > pk) pk = v; }
++                int32_t bucket = pk / 1024;
++                uint64_t now = atomic_load_explicit(&g_render_calls, memory_order_relaxed);
++                if (bucket != last_bucket || now - last_log >= 1000) {
++                    uint32_t vb = atomic_load_explicit(&a->vol, memory_order_relaxed); float g; memcpy(&g, &vb, 4);
++                    LOG("audio level #%d: peak %d of 32767 (gain %.3f)", a->id, pk, g);
++                    last_bucket = bucket; last_log = now;
++                }
++            } } }
+     {   // Probe: the PCM the device receives, for an offline look at what the speaker should have played
+         static FILE *df; static int on = -1; if (on < 0) { const char *e = getenv("DM_AUDIO_OUT_DUMP"); on = e != NULL; if (on && !(df = fopen(e, "wb"))) LOG("[RED] DM_AUDIO_OUT_DUMP cannot open %s", e); }
+         if (df && bl->mBuffers[0].mData && bl->mBuffers[0].mDataByteSize) fwrite(bl->mBuffers[0].mData, 1, bl->mBuffers[0].mDataByteSize, df); }

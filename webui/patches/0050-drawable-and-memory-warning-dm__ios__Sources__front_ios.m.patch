@@ -1,0 +1,25 @@
+diff --git a/dm/ios/Sources/front_ios.m b/dm/ios/Sources/front_ios.m
+--- a/dm/ios/Sources/front_ios.m
++++ b/dm/ios/Sources/front_ios.m
+@@ -71,7 +71,9 @@
+ - (void)layoutSubviews {
+     [super layoutSubviews];
+     CAMetalLayer *l = (CAMetalLayer *)self.layer;
+-    l.drawableSize = CGSizeMake(self.bounds.size.width * l.contentsScale, self.bounds.size.height * l.contentsScale);
++    CGSize s = CGSizeMake(self.bounds.size.width * l.contentsScale, self.bounds.size.height * l.contentsScale);
++    if (CGSizeEqualToSize(l.drawableSize, s)) return;   // the same size: the drawables stay, none of them is thrown away
++    l.drawableSize = s;   // a new size means new drawables, and the frame in flight would find its drawable gone
+ }
+ @end
+ 
+@@ -508,6 +510,10 @@
+     [NSNotificationCenter.defaultCenter addObserverForName:NSProcessInfoPowerStateDidChangeNotification object:nil queue:nil usingBlock:^(NSNotification *n) {
+         (void)n; LOG("front end: Low Power Mode → %s (%.0f s after launch)", dm_low_power_now() ? "on" : "off", (now_ns() - g_t0_ns) / 1e9); }];
+     LOG("front end: thermal state %d, brightness %.2f, Low Power Mode %s", dm_thermal_now(), g_brightness, dm_low_power_now() ? "on" : "off");
++    // The system's memory warning: the App has no increased-memory-limit entitlement, so the limit is about 3.4 GB, and
++    // the system kills the process when it is passed.  The warning is logged, so that a kill leaves something behind.
++    [NSNotificationCenter.defaultCenter addObserverForName:UIApplicationDidReceiveMemoryWarningNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *n) {
++        (void)n; LOG("[RED] the system warns that the memory is low: the process is killed when the limit is passed"); }];
+ }
+ 
+ // Frame-rate counter: the frames put on screen in the last second (nvn_mtl.m counts them for NVN and for the Vulkan layer alike; frames the display link merged away are not counted).
