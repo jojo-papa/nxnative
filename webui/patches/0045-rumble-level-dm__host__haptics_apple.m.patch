@@ -1,0 +1,43 @@
+diff --git a/dm/host/haptics_apple.m b/dm/host/haptics_apple.m
+--- a/dm/host/haptics_apple.m
++++ b/dm/host/haptics_apple.m
+@@ -89,12 +89,22 @@
+ }
+ @end
+ 
++// The rumble that really reaches the Taptic Engine: the game asks for a small amplitude and the phone's engine needs
++// a stronger one to be felt, so the gain (DM_RUMBLE_GAIN) scales it. The numbers are printed, so that "no vibration"
++// can be told apart from "a vibration that is too weak to feel".
++static void rumble_level_log(float intensity, float sharpness) {
++    static float last = -1.f; static unsigned calls;
++    if (++calls % 16 && last >= 0.f && fabsf(intensity - last) < 0.05f) return;
++    last = intensity;
++    fprintf(stderr, "[dm] haptics: rumble intensity %.3f sharpness %.3f (gain %.2f)\n", intensity, sharpness, gain);
++}
+ static void apply(dm_haptic_state s) {
+     dispatch_async(queue, ^{ @autoreleasepool {
+         if (s.epoch != dm_haptics_epoch(s.player)) return;
+         NSArray<DmRumbleChannel *> *out = channels[s.player];
+         for (NSUInteger i = 0; i < out.count; i++) {
+             dm_haptic_level level = out.count == 2 ? dm_haptics_level(&s.motor[i], 1, gain) : dm_haptics_level(s.motor, 2, gain);
++            rumble_level_log(level.intensity, level.sharpness);
+             [out[i] apply:level];
+         }
+     } });
+@@ -126,6 +136,7 @@
+         add_engine(p, engine);
+     }
+ #endif
++    fprintf(stderr, "[dm] haptics: player %d has %lu channel(s)\n", p, (unsigned long)channels[p].count);
+     dm_haptics_route(p, channels[p].count != 0);
+ }
+ void dm_haptics_apple_controller(int p, GCController *controller) {
+@@ -159,6 +170,8 @@
+         dm_haptics_init(apply, !e || atoi(e) != 0);
+ #if TARGET_OS_IPHONE
+         phoneSupported = CHHapticEngine.capabilitiesForHardware.supportsHaptics;
++        fprintf(stderr, "[dm] haptics: the phone's Taptic Engine %s, gain %.2f\n",
++                phoneSupported ? "is there" : "is not there", gain);
+ #endif
+         dispatch_sync(queue, ^{ configure(0, nil); });
+         NSNotificationCenter *nc = NSNotificationCenter.defaultCenter;

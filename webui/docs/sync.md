@@ -62,7 +62,7 @@ open `review` PR redundant. The workflow records `main` and upstream before runn
 publishes when:
 
 - the merge has exactly the expected parents;
-- the existing nine patches applied to the new upstream with `git apply`
+- the existing ten patches applied to the new upstream with `git apply`
   (exact context, offsets allowed);
 - the regenerated patches are non-empty, pass the strict `diffapply`/staging
   checks and the metadata was committed;

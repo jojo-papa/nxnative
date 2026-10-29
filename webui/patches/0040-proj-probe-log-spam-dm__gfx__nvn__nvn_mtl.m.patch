@@ -1,0 +1,40 @@
+diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
+--- a/dm/gfx/nvn/nvn_mtl.m
++++ b/dm/gfx/nvn/nvn_mtl.m
+@@ -4727,8 +4727,27 @@
+ // consecutive float4 slots where one of the last two carries the -1 of the perspective w row (or column, depending on the layout) and the first two carry the x and y scales of
+ // a 45-90 degree vertical field of view. Nothing is changed; the probe only reads and logs. It scans each buffer once per frame (the same buffer is bound again for every
+ // draw), so it costs little.
+-static int proj_probe_on(void) { static int v = -1; if (v < 0) { v = getenv("DM_NVN_PROJ") != NULL; if (v) MLOG("DM_NVN_PROJ: looking for the perspective matrix in the uniform buffers the vertex stage binds (read-only)"); } return v; }
++// DM_NVN_PROJ=1 turns the probe on, DM_NVN_PROJ=0 (or an empty value) leaves it off.  The mere presence of the
++// variable used to turn it on, so an environment file that set it to 0 kept the probe running: it scanned the uniform
++// buffers of every draw and wrote a line per matrix it found (528282 lines in half an hour, 85 MB), which slows the
++// game down and buries everything else in the log.
++static int proj_probe_on(void) { static int v = -1; if (v < 0) { const char *e = getenv("DM_NVN_PROJ"); v = e && atoi(e) != 0; if (v) MLOG("DM_NVN_PROJ: looking for the perspective matrix in the uniform buffers the vertex stage binds (read-only)"); } return v; }
+ static uint64_t g_proj_seen[16]; static int g_proj_nseen; static uint64_t g_proj_frame;
++// The same matrix is found again in every frame: only a matrix that is new at that address is written, and one that
++// changed is written at most once every 300 frames, so the log stays readable.
++static uint64_t g_proj_log_addr[8], g_proj_log_slot[8], g_proj_log_frame[8]; static uint32_t g_proj_log_hash[8]; static int g_proj_log_n;
++static int proj_log_skip(uint64_t addr, uint64_t slot, const float *v, uint64_t frame) {
++    uint32_t h = 2166136261u;
++    for (int j = 0; j < 16; j++) { uint32_t b; memcpy(&b, &v[j], 4); h ^= b; h *= 16777619u; }
++    for (int i = 0; i < g_proj_log_n; i++) if (g_proj_log_addr[i] == addr && g_proj_log_slot[i] == slot) {
++        if (g_proj_log_hash[i] == h) return 1;                     // unchanged: nothing new to write
++        if (frame - g_proj_log_frame[i] < 300) return 1;           // changed, but it was written recently
++        g_proj_log_hash[i] = h; g_proj_log_frame[i] = frame; return 0;
++    }
++    if (g_proj_log_n < 8) { g_proj_log_addr[g_proj_log_n] = addr; g_proj_log_slot[g_proj_log_n] = slot; g_proj_log_hash[g_proj_log_n] = h; g_proj_log_frame[g_proj_log_n] = frame; g_proj_log_n++; }
++    else { for (int i = 0; i < 7; i++) { g_proj_log_addr[i] = g_proj_log_addr[i+1]; g_proj_log_slot[i] = g_proj_log_slot[i+1]; g_proj_log_hash[i] = g_proj_log_hash[i+1]; g_proj_log_frame[i] = g_proj_log_frame[i+1]; } g_proj_log_addr[7] = addr; g_proj_log_slot[7] = slot; g_proj_log_hash[7] = h; g_proj_log_frame[7] = frame; }
++    return 0;
++}
+ static void proj_probe(int stage, int reg, uint64_t addr, uint64_t size) {
+     if (!size || size > (1u << 20)) return;
+     uint64_t frame = atomic_load(&g_cur_frame);
+@@ -4742,6 +4761,7 @@
+         if (!(r2[2] == -1.0f || r2[3] == -1.0f || r3[2] == -1.0f || r3[3] == -1.0f)) continue;
+         float xs = fabsf(r0[0]), ys = fabsf(r1[1]);
+         if (!(xs > 0.05f && xs < 12.0f) || !(ys > 0.3f && ys < 12.0f)) continue;
++        if (proj_log_skip(addr, k, r0, frame)) return;   // the same matrix as before: nothing new to write
+         MLOG("projection candidate: stage %d cb%d addr=%#llx size=%llu slot %llu: (%g,%g,%g,%g) (%g,%g,%g,%g) (%g,%g,%g,%g) (%g,%g,%g,%g)",
+              stage, reg, (unsigned long long)addr, (unsigned long long)size, (unsigned long long)k,
+              r0[0], r0[1], r0[2], r0[3], r1[0], r1[1], r1[2], r1[3], r2[0], r2[1], r2[2], r2[3], r3[0], r3[1], r3[2], r3[3]);

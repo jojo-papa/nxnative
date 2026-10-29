@@ -42,9 +42,15 @@ def main():
     root = a.out.resolve()
     tools = root / 'chain/gfx/tools'
     tools.mkdir(parents=True, exist_ok=True)
+    # dmsh_chain.py --header writes the chain version header into dm/gfx/nvn of the chain tree
+    (root / 'chain/gfx/nvn').mkdir(parents=True, exist_ok=True)
     original = repo / 'dm/gfx/tools'
     for p in original.glob('dmsh_*.py'):
         shutil.copyfile(p, tools / p.name)
+    # dmsh_build.py runs these two from its own directory to make the profile's c1 / uniform extent
+    # tables; cb_extent.py imports c1_guard.py from it
+    for name in ('c1_guard.py', 'cb_extent.py'):
+        shutil.copyfile(original / name, tools / name)
     for folder in ('dmsh_xlate',):
         shutil.copytree(original / folder, tools / folder, dirs_exist_ok=True)
     # Git's Windows checkout uses CRLF; the pinned translator embeds LF sources.
@@ -73,6 +79,8 @@ def main():
     build = replace(build, "['xcrun', '-sdk', 'macosx', 'metallib', air, '-o', lib]", repr([metallib]) + " + [air, '-o', lib]")
     build = replace(build, '[XLATE, jp, w]', repr([dotnet, dll]) + ' + [jp, w]')
     build = replace(build, "['spirv-cross',", '[' + repr(sc) + ',')
+    # A Windows tool may answer in the console code page: never fail the build on it
+    build = build.replace('capture_output=True, text=True', 'capture_output=True, text=True, errors="replace"')
     (tools / 'dmsh_build.py').write_text(build, encoding='utf-8')
     ip = root / 'chain/ios/tools/ios_metal.py'
     src = ip.read_text(encoding='utf-8')
@@ -91,11 +99,15 @@ def main():
     cp.write_text(src, encoding='utf-8')
     cp = tools / 'dmsh_chain.py'
     src = cp.read_text(encoding='utf-8')
-    src = replace(src, "['which', 'spirv-cross']", "['where.exe', " + repr(sc) + ']')
+    # spirv-cross is not on PATH: fingerprint the file the caller named, not a lookup
+    src = replace(src, "    sc = subprocess.run(['which', 'spirv-cross'], capture_output=True, text=True).stdout.strip()\n    t['spirv-cross'] = sha16(sc) if sc else 'missing'",
+                  '    sc = ' + repr(sc) + "\n    t['spirv-cross'] = sha16(sc) if os.path.isfile(sc) else 'missing'")
     src = replace(src, "[os.path.join(XLATE_DIR, 'dmsh_xlate'), '--source-sha']", repr([dotnet, dll, '--source-sha']))
     src = replace(src, "['xcrun', '-sdk', sdk, 'metal', '--version']", repr([metal, '--version']))
     src = replace(src, '    return t\n', '    t["windows_tools"] = ' + repr(identity) + '\n    return t\n')
     src = replace(src, "'tools/dmsh_chain.lock']", "'tools/dmsh_chain.lock', 'tools/windows_shader_build.py', 'tools/dmsh_mtlcache.py']")
+    # A Windows tool may answer in the console code page: never fail the build on it
+    src = src.replace('capture_output=True, text=True', 'capture_output=True, text=True, errors="replace"')
     cp.write_text(src, encoding='utf-8')
     # Windows indexers can briefly hold a newly written cache file without
     # delete sharing. Retry the same atomic operation; never discard a failure.

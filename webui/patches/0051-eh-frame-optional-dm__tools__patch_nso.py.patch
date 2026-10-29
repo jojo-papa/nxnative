@@ -1,0 +1,35 @@
+diff --git a/dm/tools/patch_nso.py b/dm/tools/patch_nso.py
+--- a/dm/tools/patch_nso.py
++++ b/dm/tools/patch_nso.py
+@@ -435,15 +435,22 @@
+     if app == 0x30: v += ehs
+     return v, sz
+ _, penc, cenc, tenc = IMG[ehs:ehs + 4]
+-o = ehs + 4
+-_, s = rd(o, penc); o += s
+-nfde, s = rd(o, cenc); o += s
+-starts = set()
+-for _ in range(nfde):
+-    a, s = rd(o, tenc); o += s
+-    _, s = rd(o, tenc); o += s
+-    starts.add(a)
+-starts = sorted(x for x in starts if x < TEXT_END)
++starts = []
++# A module whose exception header is missing has no function boundaries.  The modules of the older SDKs do not have
++# one (New Super Mario Bros. U Deluxe main, SDK 4): the bytes at its place are not a header at all, and reading them
++# as one ends in a format code that does not exist.  Every rewrite site is then a function of its own, which is what
++# func_of() falls back to for the code before the first FDE.  A module with a header keeps the path below, and its
++# rewrite stays byte for byte the one before.
++if IMG[ehs] == 1 and all((e & 0xF) in (0x3, 0xB, 0x4) for e in (penc, cenc, tenc)):
++    o = ehs + 4
++    _, s = rd(o, penc); o += s
++    nfde, s = rd(o, cenc); o += s
++    found = set()
++    for _ in range(nfde):
++        a, s = rd(o, tenc); o += s
++        _, s = rd(o, tenc); o += s
++        found.add(a)
++    starts = sorted(x for x in found if x < TEXT_END)
+ 
+ # ---- Linear scan to find all rewrite points (not relying on register read/write reports) ----
+ # Data blocks in the text (nso_code.py: Absolum's main starts with 1.7 MB of them) are not code: words there that read as rewrite sites are left alone

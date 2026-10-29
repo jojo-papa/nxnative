@@ -1,0 +1,38 @@
+diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
+--- a/dm/gfx/nvn/nvn_mtl.m
++++ b/dm/gfx/nvn/nvn_mtl.m
+@@ -1070,23 +1070,28 @@
+ // The perspective matrix at a slot of a uniform buffer: four consecutive float4 rows. Row-major, the w row is the last one
+ // (its z is the -1 of the perspective); column-major, the -1 is the w component of the third row. The x and y scales are in
+ // the first two rows in both layouts.
++// The scales are only checked for being plausible: Odyssey's own projection has the x scale 4.27261 and the y scale
++// 7.59575, which a narrow range (the field of view of a desktop game) would have refused. What tells the camera's matrix
++// from another one is the aspect of the two scales, which has to match the picture's own aspect.
++// The first two rows may carry a translation (the last component): that is the camera's view-projection, the projection
++// times the view, and it is scaled the same way (its first row is the projection's first row times the view's first row).
+ static int proj_signature(const float *f, uint64_t slot, int col) {
+     const float *r0 = f + slot * 4, *r1 = r0 + 4, *r2 = r0 + 8, *r3 = r0 + 12;
+-    if (fabsf(r0[1]) > 1e-2f || fabsf(r0[2]) > 1e-2f || fabsf(r0[3]) > 1e-2f || fabsf(r1[0]) > 1e-2f ||
+-        fabsf(r1[2]) > 1e-2f || fabsf(r1[3]) > 1e-2f || fabsf(r2[0]) > 1e-2f || fabsf(r2[1]) > 1e-2f) return 0;
++    if (fabsf(r0[1]) > 1e-2f || fabsf(r0[2]) > 1e-2f || fabsf(r1[0]) > 1e-2f ||
++        fabsf(r1[2]) > 1e-2f || fabsf(r2[0]) > 1e-2f || fabsf(r2[1]) > 1e-2f) return 0;
+     float xs = fabsf(r0[0]), ys = fabsf(r1[1]);
+-    if (!(xs > 0.3f && xs < 6.0f) || !(ys > 0.6f && ys < 4.0f)) return 0;
++    if (!(xs > 0.05f && xs < 64.0f) || !(ys > 0.05f && ys < 64.0f)) return 0;
+     return col ? (r2[3] == -1.0f) : (r3[2] == -1.0f);
+ }
+ static int proj_scan(const float *f, uint64_t n, uint64_t *slot, int *col) {
+     if (n > PROJ_SCAN_SLOTS) n = PROJ_SCAN_SLOTS;
+     for (uint64_t k = 0; k + 3 < n; k++) {
+         const float *r0 = f + k * 4;
+-        if (fabsf(r0[1]) > 1e-2f || fabsf(r0[2]) > 1e-2f || fabsf(r0[3]) > 1e-2f) continue;   // the first row: the x scale and nothing else
++        if (fabsf(r0[1]) > 1e-2f || fabsf(r0[2]) > 1e-2f) continue;   // the first row: the x scale and nothing else (a translation may follow)
+         const float *r1 = r0 + 4, *r2 = r0 + 8, *r3 = r0 + 12;
+-        if (fabsf(r1[0]) > 1e-2f || fabsf(r1[2]) > 1e-2f || fabsf(r1[3]) > 1e-2f || fabsf(r2[0]) > 1e-2f || fabsf(r2[1]) > 1e-2f) continue;
++        if (fabsf(r1[0]) > 1e-2f || fabsf(r1[2]) > 1e-2f || fabsf(r2[0]) > 1e-2f || fabsf(r2[1]) > 1e-2f) continue;
+         float xs = fabsf(r0[0]), ys = fabsf(r1[1]);
+-        if (!(xs > 0.3f && xs < 6.0f) || !(ys > 0.6f && ys < 4.0f)) continue;
++        if (!(xs > 0.05f && xs < 64.0f) || !(ys > 0.05f && ys < 64.0f)) continue;
+         if (r3[2] == -1.0f) { *slot = k; *col = 0; return 1; }
+         if (r2[3] == -1.0f) { *slot = k; *col = 1; return 1; }
+     }

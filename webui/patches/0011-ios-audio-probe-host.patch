@@ -1,0 +1,63 @@
+diff --git a/dm/host/hle_audio.c b/dm/host/hle_audio.c
+--- a/dm/host/hle_audio.c
++++ b/dm/host/hle_audio.c
+@@ -82,6 +82,11 @@
+ }
+ 
+ // Take n bytes from the pending queue and hand them to the output side; once a whole block has played, move it to released and notify the ordinary thread.
++// The player's own output gain (the front end's volume slider): a multiplier on top of the gain the game
++// asks for. Kept here so the front end can move it without a rebuild of the game.
++static _Atomic float g_user_gain = 1.f;
++void dm_audio_set_user_gain(float g) { if (!(g >= 0.f)) g = 0.f; if (g > 4.f) g = 4.f; atomic_store_explicit(&g_user_gain, g, memory_order_relaxed); }
++
+ static void pull(aout *a, uint8_t *dst, uint64_t n) {
+     int released = 0;
+     int16_t *s16 = (int16_t *)dst; uint64_t ns = n / 2;
+@@ -107,8 +112,16 @@
+         }
+     }
+     uint32_t vb = atomic_load_explicit(&a->vol, memory_order_relaxed);
+-    if (vb != 0x3f800000u) {   // the output's volume (SetAudioOutVolume), as the audout session applies it to the PCM16 it plays; saturating
++    {   // Probe: DM_AUDIO_GAIN_OVERRIDE forces the gain the samples are scaled by (0 = off, the game's own value
++        // is used). A game that asks for 0 silences the output without any other symptom, and this lets that be
++        // worked around from outside (an env file on the device) without a rebuild.
++        static int ov = -1; static float g = 1.f; if (ov < 0) { const char *e = getenv("DM_AUDIO_GAIN_OVERRIDE"); ov = e ? 1 : 0; if (ov) { g = (float)atof(e); LOG("[RED] audio: DM_AUDIO_GAIN_OVERRIDE=%.6f forces the output gain", g); } }
++        if (ov) { uint32_t bb; memcpy(&bb, &g, 4); vb = bb; } }
++    float vg = 1.f;   // the player's own gain (the front end's volume slider), on top of the game's
++    { float ug = atomic_load_explicit(&g_user_gain, memory_order_relaxed); if (ug != 1.f) vg = ug; }
++    if (vb != 0x3f800000u || vg != 1.f) {   // the output's volume (SetAudioOutVolume), as the audout session applies it to the PCM16 it plays; saturating
+         float v; memcpy(&v, &vb, 4);
++        v *= vg;
+         for (uint64_t i = 0; i < ns; i++) { float x = s16[i] * v; s16[i] = (int16_t)(x > 32767.f ? 32767.f : x < -32768.f ? -32768.f : x); }
+     }
+     if (released) {
+@@ -156,6 +169,17 @@
+             LOG("audio #%d device callbacks %llu: %u–%u frames each, %.1f blocks queued on average at callback; in these 2000, %llu underruns, %.1f ms zero-padded", a->id, (unsigned long long)a->st_calls, a->st_fmin, a->st_fmax, a->st_qsum / 2000.0,
+                 (unsigned long long)(un - a->st_u0), (ubb - a->st_ub0) / (2.0 * a->ch) / (RATE / 1000.0)); a->st_fmin = ~0u; a->st_fmax = 0; a->st_qsum = 0; a->st_u0 = un; a->st_ub0 = ubb; } }
+     pull_device(a, bl->mBuffers[0].mData, bl->mBuffers[0].mDataByteSize);
++    {   // Probe: what the device actually receives. The host's own PCM is real (DM_AUDIO_DUMP) and the
++        // callback runs without underruns, so a silent speaker means the gain or the system volume. Log the
++        // buffer handed on and the gain it was scaled by.
++        static int n; if (n < 4) { n++;
++            const int16_t *s = (const int16_t *)bl->mBuffers[0].mData; uint32_t ns = bl->mBuffers[0].mDataByteSize / 2, i; int32_t pk = 0;
++            for (i = 0; i < ns; i++) { int32_t v = s[i] < 0 ? -s[i] : s[i]; if (v > pk) pk = v; }
++            uint32_t vb = atomic_load_explicit(&a->vol, memory_order_relaxed); float g; memcpy(&g, &vb, 4);
++            LOG("[RED] audio probe #%d: nbuf=%u frames=%u bytes=%u peak=%d gain=%.6f", n, bl->mNumberBuffers, frames, bl->mBuffers[0].mDataByteSize, pk, g); } }
++    {   // Probe: the PCM the device receives, for an offline look at what the speaker should have played
++        static FILE *df; static int on = -1; if (on < 0) { const char *e = getenv("DM_AUDIO_OUT_DUMP"); on = e != NULL; if (on && !(df = fopen(e, "wb"))) LOG("[RED] DM_AUDIO_OUT_DUMP cannot open %s", e); }
++        if (df && bl->mBuffers[0].mData && bl->mBuffers[0].mDataByteSize) fwrite(bl->mBuffers[0].mData, 1, bl->mBuffers[0].mDataByteSize, df); }
+     { static int mute = -1; if (mute < 0) { const char *e = getenv("DM_AUDIO_MUTE"); mute = e && atoi(e); }   // diagnostic: the whole real-output path (AudioUnit callback pacing, background take-over) but with the output silenced (lifecycle tests on the Mac without noise)
+       if (mute) memset(bl->mBuffers[0].mData, 0, bl->mBuffers[0].mDataByteSize); }
+     return noErr;
+@@ -356,7 +380,10 @@
+ HLE_FORCE("_ZN2nn5audio23GetAudioOutSampleFormatEPKNS0_8AudioOutE", "sample format; PCM16 only", int, h_au_Fmt, const void *g) { (void)ao(g); return FMT_PCM16; }
+ // STEINS;GATE RE:BOOT (SDK 20) sets its movie sound's output volume right after opening it; the SDK's versions call the audout session the host never made (a null read at sdk+0x1f2314)
+ HLE_FORCE("_ZN2nn5audio17SetAudioOutVolumeEPNS0_8AudioOutEf", "output volume; a gain on the samples the host plays", void, h_au_SetVol, void *g, float v) {
+-    if (!(v >= 0.f)) v = 0.f; uint32_t b; memcpy(&b, &v, 4); atomic_store_explicit(&ao(g)->vol, b, memory_order_relaxed);
++    if (!(v >= 0.f)) v = 0.f; uint32_t b; memcpy(&b, &v, 4);
++    {   // Probe: the gain the game asks for. A gain of 0 silences the output with no other symptom.
++        static float last = -1.f; if (v != last) { last = v; LOG("[RED] audio: SetAudioOutVolume -> %.6f", v); } }
++    atomic_store_explicit(&ao(g)->vol, b, memory_order_relaxed);
+ }
+ HLE_FORCE("_ZN2nn5audio17GetAudioOutVolumeEPKNS0_8AudioOutE", "output volume", float, h_au_GetVol, const void *g) {
+     uint32_t b = atomic_load_explicit(&ao(g)->vol, memory_order_relaxed); float v; memcpy(&v, &b, 4); return v;

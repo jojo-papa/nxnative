@@ -35,6 +35,7 @@ targets:
         UILaunchScreen: {}
         UIFileSharingEnabled: true          # Documents (log.txt, saves) visible in the Files app
         LSSupportsOpeningDocumentsInPlace: true
+        NSPhotoLibraryUsageDescription: "选择一张图片，作为游戏画面四周黑边的背景。"   # the launcher's background picture row
         UISupportedInterfaceOrientations:
           - UIInterfaceOrientationLandscapeRight
           - UIInterfaceOrientationLandscapeLeft

@@ -1,7 +1,7 @@
 """Materialize a build staging tree from the working tree.
 
 The stage is a full copy (never a writable hardlink) of the repository with seven
-fork-only source overlays and nine upstream hook patches applied.  Builds run
+fork-only source overlays and ten upstream hook patches applied.  Builds run
 only from the stage, so the working tree's upstream files stay untouched.
 """
 from __future__ import annotations
@@ -41,6 +41,10 @@ SKIP_REL_PREFIXES = (
     'dm/host/gen',
     'dm/tools/nx_extract/bin',
     'dm/tools/nx_extract/obj',
+    # The delivery folder: the built IPAs and the signed ones (several GB) are not sources,
+    # and copying them into every stage tree filled the disk and locked the files while
+    # iPASide was writing a signed IPA.
+    'out',
 )
 SKIP_FILES = {'dm/ios/Sources/Info.plist'}
 
@@ -282,10 +286,15 @@ def verify(stage: Path) -> dict:
         target = tree / item['target']
         if not target.is_file() or _hash(target.read_bytes()) != item['sha256']:
             raise ValueError(f'overlay changed: {item["target"]}')
+    # Several patches can hit one target (the series applies them in order), so the
+    # file in the tree is compared with the hash the last patch for that target left.
+    final_hashes = {}
     for item in record.get('patches', []):
-        target = tree / item['target']
-        if not target.is_file() or _hash(target.read_bytes()) != item['sha256']:
-            raise ValueError(f'patched target changed: {item["target"]}')
+        final_hashes[item['target']] = item['sha256']
+    for target, sha in final_hashes.items():
+        path = tree / target
+        if not path.is_file() or _hash(path.read_bytes()) != sha:
+            raise ValueError(f'patched target changed: {target}')
     project = (tree / 'dm/ios/project.yml').read_text(encoding='utf-8')
     if 'UILaunchScreen:' not in project or 'UIRequiresFullScreen: true' not in project:
         raise ValueError('stage project.yml lacks fullscreen keys')

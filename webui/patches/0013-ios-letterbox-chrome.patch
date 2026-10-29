@@ -1,0 +1,341 @@
+diff --git a/dm/ios/Sources/front_ios.m b/dm/ios/Sources/front_ios.m
+--- a/dm/ios/Sources/front_ios.m
++++ b/dm/ios/Sources/front_ios.m
+@@ -41,12 +41,149 @@
+ }
+ @end
+ 
++// ===== The letterbox chrome =====
++// The 16:9 picture sits in the middle of the screen, so a black bar is left around it: above and below on
++// a 4:3 tablet, on the sides in 19:5 on a phone. Those bars are put to use: a backdrop (the player's own
++// image, dropped into Documents/frame.png, or a gradient), a reflection of the picture mirrored into a bar
++// and fading out, and the shortcut buttons. Every part can be switched off from the device
++// (DM_CHROME / DM_REFLECT / DM_VOLUME in Documents/env.txt; no rebuild needed).
++@class DmChromeBar;
++
++static BOOL env_on(const char *name, int fallback) { const char *e = getenv(name); return e ? atoi(e) != 0 : fallback != 0; }
++void dm_audio_set_user_gain(float g);   // hle_audio.c: the slider's gain, on top of the game's own output gain
++void mtl_grab_next_present(void (^cb)(CGImageRef img));   // nvn_mtl.m: the next presented frame as an image
++
++static CALayer *g_chrome_layer;        // the backdrop and the reflection, behind the picture
++static CALayer *g_reflection;          // the mirrored picture
++static CADisplayLink *g_reflect_link;
++static CAGradientLayer *g_backdrop;    // the gradient the bars show
++static CALayer *g_backdrop_image;      // the player's own image (Documents/frame.png)
++static DmChromeBar *g_chrome;          // the shortcut buttons
++static UILabel *g_toast;               // a short notice after a button press
++static BOOL g_chrome_hidden;
++static int g_reflect_ticks;            // the reflection's own clock (the fallback path takes every third tick)
++
++// The picture's rect in the screen and the free bars around it.
++typedef struct { CGRect game, top, bottom, left, right; } dm_letterbox;
++static dm_letterbox front_ios_letterbox(CGRect b) {
++    dm_letterbox L;
++    CGFloat w = b.size.width, h = b.size.height, gw = w, gh = h;
++    if (w / h > 16.0 / 9.0) gw = h * 16.0 / 9.0; else gh = w * 9.0 / 16.0;
++    L.game = CGRectMake(floor((w - gw) / 2), floor((h - gh) / 2), floor(gw), floor(gh));
++    CGFloat gy = CGRectGetMinY(L.game), gb = CGRectGetMaxY(L.game), gx = CGRectGetMinX(L.game), gr = CGRectGetMaxX(L.game);
++    L.top = CGRectMake(0, 0, w, gy);
++    L.bottom = CGRectMake(0, gb, w, h - gb);
++    L.left = CGRectMake(0, 0, gx, h);
++    L.right = CGRectMake(gr, 0, w - gr, h);
++    return L;
++}
++
++// A short notice over the picture.
++static void chrome_toast(NSString *text) {
++    if (!g_toast) return;
++    g_toast.text = text; g_toast.alpha = 1;
++    [UIView animateWithDuration:0.3 delay:1.8 options:0 animations:^{ g_toast.alpha = 0; } completion:nil];
++}
++
++// The player's own backdrop image, if there is one: Documents/frame.png (the Files app can put it there).
++static UIImage *chrome_backdrop_image(void) {
++    NSString *doc = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
++    for (NSString *name in @[@"frame.png", @"chrome.png", @"mask.png"]) {
++        NSString *p = [doc stringByAppendingPathComponent:name];
++        if ([NSFileManager.defaultManager fileExistsAtPath:p]) {
++            UIImage *im = [UIImage imageWithContentsOfFile:p];
++            if (im) { LOG("front end: letterbox backdrop %s (%lux%lu)", name.UTF8String, (unsigned long)im.size.width, (unsigned long)im.size.height); return im; }
++        }
++    }
++    return nil;
++}
++
++// The mask that fades the reflection out towards the far end of the bar. It is drawn in the reflection
++// layer's own space, where the far end of the bar is the start of it: the fade therefore runs over the
++// last `bar` fraction of the layer (the part that sticks out of the screen).
++static CAGradientLayer *chrome_fade(CGFloat bar_fraction) {
++    CAGradientLayer *m = [CAGradientLayer layer];
++    CGFloat f = 1.f - MAX(0.f, MIN(1.f, bar_fraction));
++    m.colors = @[(id)[UIColor colorWithWhite:0 alpha:0].CGColor,
++                  (id)[UIColor colorWithWhite:0 alpha:0].CGColor,
++                  (id)[UIColor colorWithWhite:0 alpha:1].CGColor];
++    m.locations = @[@0, @(f), @1];
++    return m;
++}
++
++// The shortcut buttons: a screenshot of the next presented frame, the frame-rate counter, the chrome
++// itself and the volume. A row in the upper bar when the bars are above and below the picture (a
++// tablet), a column in the right-hand bar when they are beside it (a phone in 19:5).
++@interface DmChromeBar : UIView
++@property (nonatomic, strong) NSArray<UIButton *> *buttons;
++@property (nonatomic, strong) UISlider *volume;
++@property (nonatomic, copy) void (^onAction)(NSString *what);
++@property (nonatomic, copy) void (^onVolume)(float gain);
++@end
++@implementation DmChromeBar
++- (UIButton *)button:(NSString *)title action:(SEL)action {
++    UIButton *b = [UIButton buttonWithType:UIButtonTypeSystem];
++    [b setTitle:title forState:UIControlStateNormal];
++    [b setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
++    b.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
++    b.backgroundColor = [UIColor colorWithWhite:1 alpha:0.14];
++    b.layer.cornerRadius = 8; b.layer.masksToBounds = YES;
++    b.contentEdgeInsets = UIEdgeInsetsMake(6, 12, 6, 12);
++    [b addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
++    return b;
++}
++- (instancetype)initWithFrame:(CGRect)f {
++    if ((self = [super initWithFrame:f])) {
++        self.backgroundColor = UIColor.clearColor;
++        UIButton *shot = [self button:@"截屏" action:@selector(onShot)];
++        UIButton *fps = [self button:@"FPS" action:@selector(onFps)];
++        UIButton *hide = [self button:@"隐藏" action:@selector(onHide)];
++        self.buttons = @[shot, fps, hide];
++        for (UIButton *b in self.buttons) [self addSubview:b];
++        UISlider *s = [[UISlider alloc] init];
++        s.minimumValue = 0; s.maximumValue = 2; s.value = 1;
++        s.minimumTrackTintColor = UIColor.whiteColor;
++        s.maximumTrackTintColor = [UIColor colorWithWhite:1 alpha:0.25];
++        [s addTarget:self action:@selector(onVol:) forControlEvents:UIControlEventValueChanged];
++        self.volume = s;
++        [self addSubview:s];
++    }
++    return self;
++}
++// Lay the buttons out in a row or a column inside the bar; the slider, when it is shown, goes under the
++// row (a column has no room for it).
++- (void)arrange:(CGRect)f vertical:(BOOL)vertical slider:(BOOL)slider {
++    CGFloat x = CGRectGetMinX(f), y = CGRectGetMinY(f), gap = 8, bh = 32;
++    for (UIButton *b in self.buttons) {
++        CGSize s = [b sizeThatFits:CGSizeMake(240, bh)];
++        if (vertical) { b.frame = CGRectMake(x + (CGRectGetWidth(f) - s.width) / 2, y, s.width, bh); y += bh + gap; }
++        else { b.frame = CGRectMake(x, y + (slider ? 0 : (CGRectGetHeight(f) - bh) / 2), s.width, bh); x += s.width + gap; }
++    }
++    self.volume.hidden = !slider;
++    if (slider) {
++        CGFloat sw = MIN(110, CGRectGetWidth(f));
++        if (vertical) self.volume.frame = CGRectMake(x + (CGRectGetWidth(f) - sw) / 2, y, sw, bh);
++        else self.volume.frame = CGRectMake(CGRectGetMinX(f), CGRectGetMaxY(f) - bh, sw, bh);
++    }
++}
++- (void)onShot { if (self.onAction) self.onAction(@"shot"); }
++- (void)onFps { if (self.onAction) self.onAction(@"fps"); }
++- (void)onHide { if (self.onAction) self.onAction(@"hide"); }
++- (void)onVol:(UISlider *)s { if (self.onVolume) self.onVolume(s.value); }
++@end
++
++
+ @interface DmRootVC : UIViewController
+ @property (nonatomic, strong) DmGameView *game;
+ @property (nonatomic, strong) UIView *pad;
+ @property (nonatomic, strong) UILabel *fps;
++@property (nonatomic, strong) DmChromeBar *chrome;
+ @property (nonatomic) BOOL launched;
+ - (void)startGame;
++- (void)build_chrome;
++- (void)chrome_tick;
++- (void)chrome_action:(NSString *)what;
++- (void)layout_chrome:(dm_letterbox)L;
+ @end
+ static DmRootVC *g_root;
+ static void launcher_done(void) { [g_root startGame]; }
+@@ -78,6 +215,7 @@
+     [self.view addSubview:self.pad];
+     self.fps = front_ios_fps_label();   // above the pad, which hides while a controller is connected
+     if (self.fps) [self.view addSubview:self.fps];
++    if (env_on("DM_CHROME", 1)) [self build_chrome];   // the backdrop goes behind the picture, the buttons over it
+     [self.view setNeedsLayout]; [self.view layoutIfNeeded];
+     UIApplication.sharedApplication.idleTimerDisabled = YES;
+     front_ios_boot();
+@@ -85,9 +223,45 @@
+ - (void)viewDidLayoutSubviews {
+     [super viewDidLayoutSubviews];
+     CGRect b = self.view.bounds; if (!self.game) return;
+-    CGFloat w = b.size.width, h = b.size.height;   // Fit 16:9 into the whole screen
+-    if (w / h > 16.0 / 9.0) w = h * 16.0 / 9.0; else h = w * 9.0 / 16.0;
+-    self.game.frame = CGRectMake(floor((b.size.width - w) / 2), floor((b.size.height - h) / 2), w, h);
++    dm_letterbox L = front_ios_letterbox(b);   // the 16:9 picture and the bars around it
++    self.game.frame = L.game;
++    if (g_chrome_layer) g_chrome_layer.frame = b;
++    if (g_backdrop) g_backdrop.frame = b;
++    if (g_backdrop_image) g_backdrop_image.frame = b;
++    // The reflection: into the lower bar when the screen is wider than the picture (a tablet), into the
++    // right-hand bar when it is taller (a phone in 19:5, where the bars are on the sides). The layer is
++    // as big as the picture and hangs off the screen; only the part in the bar shows, mirrored, and the
++    // mask fades it out towards the far end of the bar.
++    if (g_reflection) {
++        CGFloat gw = L.game.size.width, gh = L.game.size.height;
++        int horizontal = 0;
++        g_reflection.hidden = NO;
++        if (L.bottom.size.height >= 48) {
++            g_reflection.bounds = CGRectMake(0, 0, gw, gh);
++            g_reflection.anchorPoint = CGPointMake(0.5, 0.5);
++            g_reflection.position = CGPointMake(CGRectGetMidX(L.game), CGRectGetMaxY(L.game) + gh / 2);
++            g_reflection.transform = CATransform3DMakeScale(1, -1, 1);
++        } else if (L.right.size.width >= 48) {
++            horizontal = 1;
++            g_reflection.bounds = CGRectMake(0, 0, gw, gh);
++            g_reflection.anchorPoint = CGPointMake(0.5, 0.5);
++            g_reflection.position = CGPointMake(CGRectGetMaxX(L.game) + gw / 2, CGRectGetMidY(L.game));
++            g_reflection.transform = CATransform3DMakeScale(-1, 1, 1);
++        } else g_reflection.hidden = YES;
++        if (!g_reflection.hidden) {
++            CGFloat bar = horizontal ? L.right.size.width : L.bottom.size.height;
++            CGFloat whole = horizontal ? gw : gh;
++            CAGradientLayer *m = chrome_fade(whole > 0 ? bar / whole : 0);
++            m.frame = g_reflection.bounds;
++            g_reflection.mask = m;
++        }
++    }
++    [self layout_chrome:L];
++    if (g_toast) {
++        CGSize sz = [g_toast sizeThatFits:CGSizeMake(400, 60)];
++        g_toast.bounds = CGRectMake(0, 0, sz.width + 28, sz.height + 14);
++        g_toast.center = CGPointMake(CGRectGetMidX(L.game), CGRectGetMaxY(L.game) - 44);
++    }
+     if (self.fps) {   // the top row's free stretch: right of DmGamepad.m's L3 key (102 + 17 of its units from the safe edge), level with − / + (22 units down); u is its unit
+         CGRect s = UIEdgeInsetsInsetRect(b, self.view.safeAreaInsets); CGFloat u = MIN(b.size.height / 430.0, 1.3);
+         self.fps.frame = CGRectMake(floor(CGRectGetMinX(s) + 130 * u), floor(CGRectGetMinY(s) + 22 * u - 11), 64, 22);
+@@ -103,6 +277,130 @@
+ - (UIRectEdge)preferredScreenEdgesDeferringSystemGestures { return UIRectEdgeAll; }   // Edge gestures need two swipes, to avoid accidental exits
+ - (BOOL)prefersStatusBarHidden { return YES; }
+ - (UIInterfaceOrientationMask)supportedInterfaceOrientations { return UIInterfaceOrientationMaskLandscape; }
++
++// The backdrop, the reflection and the shortcut buttons. The backdrop and the reflection go into one
++// layer behind the picture (which covers the middle of the screen), so only the bars around it show them;
++// the buttons are views over the picture, where they can be touched.
++- (void)build_chrome {
++    CALayer *host = [CALayer layer];
++    [self.view.layer insertSublayer:host atIndex:0];   // behind every subview (the picture, the pad)
++    g_chrome_layer = host;
++    CAGradientLayer *bg = [CAGradientLayer layer];
++    bg.colors = @[(id)[UIColor colorWithRed:0.055 green:0.065 blue:0.095 alpha:1].CGColor,
++                  (id)[UIColor colorWithRed:0.012 green:0.015 blue:0.024 alpha:1].CGColor];
++    bg.startPoint = CGPointMake(0.5, 0); bg.endPoint = CGPointMake(0.5, 1);
++    [host addSublayer:bg];
++    g_backdrop = bg;
++    UIImage *im = chrome_backdrop_image();
++    if (im) {
++        CALayer *il = [CALayer layer];
++        il.contents = (id)im.CGImage;
++        il.contentsGravity = kCAGravityResizeAspectFill;
++        il.masksToBounds = YES;
++        [host addSublayer:il];
++        g_backdrop_image = il;
++    }
++    if (env_on("DM_REFLECT", 1)) {
++        CALayer *r = [CALayer layer];
++        r.contentsGravity = kCAGravityResizeAspect;
++        [host addSublayer:r];
++        g_reflection = r;
++    }
++    self.chrome = [[DmChromeBar alloc] initWithFrame:CGRectZero];
++    self.chrome.onAction = ^(NSString *what) { [g_root chrome_action:what]; };
++    self.chrome.onVolume = ^(float gain) { dm_audio_set_user_gain(gain); };
++    [self.view addSubview:self.chrome];
++    g_chrome = self.chrome;
++    g_toast = [[UILabel alloc] initWithFrame:CGRectZero];
++    g_toast.textAlignment = NSTextAlignmentCenter;
++    g_toast.textColor = UIColor.whiteColor;
++    g_toast.font = [UIFont systemFontOfSize:15 weight:UIFontWeightSemibold];
++    g_toast.backgroundColor = [UIColor colorWithWhite:0 alpha:0.55];
++    g_toast.layer.cornerRadius = 10; g_toast.layer.masksToBounds = YES;
++    g_toast.alpha = 0; g_toast.userInteractionEnabled = NO;
++    [self.view addSubview:g_toast];
++    if (!g_reflect_link) {
++        g_reflect_link = [CADisplayLink displayLinkWithTarget:self selector:@selector(chrome_tick)];
++        g_reflect_link.preferredFrameRateRange = CAFrameRateRangeMake(10, 30, 30);   // the reflection does not need the full frame rate
++        [g_reflect_link addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
++    }
++    LOG("front end: letterbox chrome on (backdrop %s, reflection %s)", im ? "image" : "gradient", env_on("DM_REFLECT", 1) ? "on" : "off");
++}
++
++// The reflection shows the picture's last presented frame, mirrored into a bar. The game layer keeps the
++// picture in its contents (framebufferOnly is off), so no copy of the pixels is made here; when it does
++// not, the picture is taken from the presenter instead, every third tick, so the readback does not cost
++// the game its frame rate.
++- (void)chrome_tick {
++    if (!g_reflection || !self.game) return;
++    id c = ((CALayer *)self.game.layer).contents;
++    if (c) { g_reflection.contents = c; g_reflect_ticks = 0; return; }
++    if (g_reflect_ticks++ % 3) return;
++    static int busy;
++    if (busy) return;
++    busy = 1;
++    mtl_grab_next_present(^(CGImageRef img) {
++        if (!img) { dispatch_async(dispatch_get_main_queue(), ^{ busy = 0; }); return; }
++        dispatch_async(dispatch_get_main_queue(), ^{
++            if (g_reflection) g_reflection.contents = (__bridge id)img;
++            CGImageRelease(img);
++            busy = 0;
++        });
++    });
++}
++
++// The three buttons: a screenshot of the next presented frame, the frame-rate counter and the chrome
++// itself.
++- (void)chrome_action:(NSString *)what {
++    if ([what isEqualToString:@"shot"]) {
++        static int n;
++        NSString *doc = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory, NSUserDomainMask, YES).firstObject;
++        NSString *p = [doc stringByAppendingPathComponent:[NSString stringWithFormat:@"screenshot-%d.png", ++n]];
++        dm_gfx_shot_at(1, p.UTF8String);
++        chrome_toast([NSString stringWithFormat:@"已保存 %@", p.lastPathComponent]);
++    } else if ([what isEqualToString:@"fps"]) {
++        int on = self.fps != nil;
++        if (on) { [self.fps removeFromSuperview]; self.fps = nil; }
++        else { self.fps = front_ios_fps_label(); if (self.fps) [self.view addSubview:self.fps]; }
++        setenv("DM_SHOW_FPS", on ? "0" : "1", 1);
++        [self.view setNeedsLayout];
++        chrome_toast(on ? @"帧率计数 关" : @"帧率计数 开");
++    } else if ([what isEqualToString:@"hide"]) {
++        g_chrome_hidden = !g_chrome_hidden;
++        if (g_chrome) g_chrome.hidden = g_chrome_hidden;
++        if (g_chrome_layer) g_chrome_layer.hidden = g_chrome_hidden;
++        chrome_toast(g_chrome_hidden ? @"已隐藏界面" : @"已显示界面");
++    }
++}
++
++// Where the buttons go. The upper bar is shared with the virtual gamepad's top row: ZL / ZR in the
++// corners, L3 / R3 inboard of them, the - / + keys and the layout button at the top centre (all in the
++// gamepad's own unit u). The free stretch is between the centre cluster and R3; the frame-rate counter
++// sits in the other one. When the bars are beside the picture (a phone in 19:5) the buttons become a
++// column in the right-hand one, inside the safe area.
++- (void)layout_chrome:(dm_letterbox)L {
++    if (!self.chrome) return;
++    CGRect b = self.view.bounds, safe = UIEdgeInsetsInsetRect(b, self.view.safeAreaInsets);
++    CGFloat u = MIN(b.size.height / 430.0, 1.3), mid = b.size.width / 2, pad = 8;
++    BOOL slider = env_on("DM_VOLUME", 1);
++    if (L.top.size.height >= 56) {
++        CGFloat x0 = mid + 77 * u + pad, x1 = b.size.width - 119 * u - pad;
++        if (x1 - x0 < 150) { x0 = 119 * u + pad; x1 = mid - 77 * u - pad; }
++        if (x1 - x0 < 150) { x0 = pad; x1 = b.size.width - pad; }
++        CGFloat h = (slider && L.top.size.height >= 64) ? 64 : 32;
++        self.chrome.frame = CGRectMake(x0, pad, x1 - x0, h);
++        [self.chrome arrange:self.chrome.bounds vertical:NO slider:(slider && h >= 64)];
++    } else if (L.right.size.width >= 56) {
++        CGFloat w = MIN(L.right.size.width - 8, 64);
++        CGFloat x = MAX(CGRectGetMinX(safe), MIN(CGRectGetMaxX(L.game) + 4, CGRectGetMaxX(safe) - w));
++        self.chrome.frame = CGRectMake(x, CGRectGetMidY(L.game) - 60, w, 120);
++        [self.chrome arrange:self.chrome.bounds vertical:YES slider:NO];
++    } else {
++        self.chrome.frame = CGRectMake(CGRectGetMaxX(L.game) - 220, CGRectGetMinY(L.game) + 8, 212, 32);
++        [self.chrome arrange:self.chrome.bounds vertical:NO slider:NO];
++    }
++    self.chrome.hidden = g_chrome_hidden;
++}
+ @end
+ UIViewController *front_ios_root(void) { return [DmRootVC new]; }
+ 

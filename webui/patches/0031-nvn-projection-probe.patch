@@ -1,0 +1,45 @@
+diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
+--- a/dm/gfx/nvn/nvn_mtl.m
++++ b/dm/gfx/nvn/nvn_mtl.m
+@@ -4590,6 +4590,33 @@
+ static uint64_t g_geo_bind[5];
+ static int encode_args_(id<MTLCommandEncoder> en, NvShader *sh, int nvn_stage, int metal_vertex);
+ static int encode_args(id<MTLCommandEncoder> en, NvShader *sh, int nvn_stage, int metal_vertex) { AP_B; int r = encode_args_(en, sh, nvn_stage, metal_vertex); AP_E(3); return r; }
++// DM_NVN_PROJ: a read-only probe for the perspective matrix in a uniform buffer, so a host-side change can widen the view without touching the game.
++// The game's projection reaches the vertex shader as float4 rows out of a uniform buffer (Super Mario Odyssey's vertex shaders read it as float4s out of a `float4 _m0[4096]`
++// array, with the rows at consecutive slots). Its slot index is what such a change needs, and the matrix itself is not in the binary, so it is looked for in the data: four
++// consecutive float4 slots where one of the last two carries the -1 of the perspective w row (or column, depending on the layout) and the first two carry the x and y scales of
++// a 45-90 degree vertical field of view. Nothing is changed; the probe only reads and logs. It scans each buffer once per frame (the same buffer is bound again for every
++// draw), so it costs little.
++static int proj_probe_on(void) { static int v = -1; if (v < 0) { v = getenv("DM_NVN_PROJ") != NULL; if (v) MLOG("DM_NVN_PROJ: looking for the perspective matrix in the uniform buffers the vertex stage binds (read-only)"); } return v; }
++static uint64_t g_proj_seen[16]; static int g_proj_nseen; static uint64_t g_proj_frame;
++static void proj_probe(int stage, int reg, uint64_t addr, uint64_t size) {
++    if (!size || size > (1u << 20)) return;
++    uint64_t frame = atomic_load(&g_cur_frame);
++    if (frame != g_proj_frame) { g_proj_frame = frame; g_proj_nseen = 0; }   // once per buffer per frame
++    uint64_t n = size / 16; if (n < 4) return;
++    for (int i = 0; i < g_proj_nseen; i++) if (g_proj_seen[i] == addr) return;   // already scanned this frame
++    if (g_proj_nseen < 16) g_proj_seen[g_proj_nseen++] = addr; else return;
++    const float *f = (const float *)addr;
++    for (uint64_t k = 0; k + 3 < n; k++) {
++        const float *r0 = f + k * 4, *r1 = r0 + 4, *r2 = r0 + 8, *r3 = r0 + 12;
++        if (!(r2[2] == -1.0f || r2[3] == -1.0f || r3[2] == -1.0f || r3[3] == -1.0f)) continue;
++        float xs = fabsf(r0[0]), ys = fabsf(r1[1]);
++        if (!(xs > 0.05f && xs < 12.0f) || !(ys > 0.3f && ys < 12.0f)) continue;
++        MLOG("projection candidate: stage %d cb%d addr=%#llx size=%llu slot %llu: (%g,%g,%g,%g) (%g,%g,%g,%g) (%g,%g,%g,%g) (%g,%g,%g,%g)",
++             stage, reg, (unsigned long long)addr, (unsigned long long)size, (unsigned long long)k,
++             r0[0], r0[1], r0[2], r0[3], r1[0], r1[1], r1[2], r1[3], r2[0], r2[1], r2[2], r2[3], r3[0], r3[1], r3[2], r3[3]);
++        return;   // one hit per buffer is enough
++    }
++}
+ static int encode_args_(id<MTLCommandEncoder> en, NvShader *sh, int nvn_stage, int metal_vertex) {
+     if (!sh->ae) return 1;
+     args_sync_dirty();
+@@ -4616,6 +4643,7 @@
+             if (!u || !u->addr || !mtl_gpu_addr(u->addr, 1, &mb, &mo, &gpu)) {   // reads 0 (the all-zero bank), as an unbound texture slot does, instead of through a null pointer
+                 RED_ONCE(16, "stage %d cb%d has no uniform buffer bound", nvn_stage, reg); slots[aid] = zero_bank_gpu(); USE(zero_bank(), MTLResourceUsageRead); continue; }
+             uint64_t ul = cb_len(sh, reg, u->size);   // what the shader can read of it
++            if (proj_probe_on() && nvn_stage == 0) proj_probe(nvn_stage, reg, u->addr, u->size);
+             if (g_nubd && ubd_hits(u->addr, u->addr + ul)) {   // inline updates deferred in this pass (see mtl_sub_update); ubd_conflict made sure they cover the binding or the rest can be read from memory
+                 uint64_t g; const uint8_t *c; if (ubd_covers(u->addr, u->addr + ul)) gpu = ubd_shadow(u->addr, u->addr + ul);
+                 else if (ubp_get(u->addr, u->addr + ul, &g, &c)) gpu = g;

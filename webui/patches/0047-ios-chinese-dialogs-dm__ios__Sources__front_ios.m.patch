@@ -1,0 +1,29 @@
+diff --git a/dm/ios/Sources/front_ios.m b/dm/ios/Sources/front_ios.m
+--- a/dm/ios/Sources/front_ios.m
++++ b/dm/ios/Sources/front_ios.m
+@@ -527,8 +527,8 @@
+     dispatch_async(dispatch_get_main_queue(), ^{
+         UIAlertController *ac = [UIAlertController alertControllerWithTitle:t message:m preferredStyle:UIAlertControllerStyleAlert];
+         [ac addTextFieldWithConfigurationHandler:^(UITextField *f) { f.text = init; f.placeholder = ph; }];
+-        [ac addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x) { (void)x; r = 1; text = ac.textFields.firstObject.text; dispatch_semaphore_signal(done); }]];
+-        [ac addAction:[UIAlertAction actionWithTitle:@"Cancel" style:UIAlertActionStyleCancel handler:^(UIAlertAction *x) { (void)x; dispatch_semaphore_signal(done); }]];
++        [ac addAction:[UIAlertAction actionWithTitle:@"确定" style:UIAlertActionStyleDefault handler:^(UIAlertAction *x) { (void)x; r = 1; text = ac.textFields.firstObject.text; dispatch_semaphore_signal(done); }]];
++        [ac addAction:[UIAlertAction actionWithTitle:@"取消" style:UIAlertActionStyleCancel handler:^(UIAlertAction *x) { (void)x; dispatch_semaphore_signal(done); }]];
+         UIViewController *vc = nil;
+         for (UIScene *s in UIApplication.sharedApplication.connectedScenes) if ([s isKindOfClass:UIWindowScene.class]) for (UIWindow *w in ((UIWindowScene *)s).windows) if (w.isKeyWindow) vc = w.rootViewController;
+         if (!vc) { dispatch_semaphore_signal(done); return; }
+@@ -551,10 +551,10 @@
+         for (UIScene *s in UIApplication.sharedApplication.connectedScenes) if ([s isKindOfClass:UIWindowScene.class]) for (UIWindow *w in ((UIWindowScene *)s).windows) if (w.isKeyWindow) vc = w.rootViewController;
+         while (vc.presentedViewController) vc = vc.presentedViewController;
+         if (!vc) { LOG("[RED] front end: no window for the save-failure alert errno=%d", err); return; }
+-        NSString *m = err == ENOSPC ? @"Storage is full, so progress was not saved. Free up space and save again."
+-                                    : [NSString stringWithFormat:@"Saving failed (errno %d); progress was not saved.", err];
+-        UIAlertController *a = [UIAlertController alertControllerWithTitle:@"Save failed" message:m preferredStyle:UIAlertControllerStyleAlert];
+-        [a addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:nil]];
++        NSString *m = err == ENOSPC ? @"存储空间不足，进度没有保存。请释放空间后重试。"
++                                    : [NSString stringWithFormat:@"保存失败（errno %d），进度没有保存。", err];
++        UIAlertController *a = [UIAlertController alertControllerWithTitle:@"存档失败" message:m preferredStyle:UIAlertControllerStyleAlert];
++        [a addAction:[UIAlertAction actionWithTitle:@"确定" style:UIAlertActionStyleDefault handler:nil]];
+         [vc presentViewController:a animated:YES completion:nil];
+     });
+ }

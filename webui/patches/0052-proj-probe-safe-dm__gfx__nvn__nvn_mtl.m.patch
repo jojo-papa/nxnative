@@ -1,0 +1,88 @@
+diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
+--- a/dm/gfx/nvn/nvn_mtl.m
++++ b/dm/gfx/nvn/nvn_mtl.m
+@@ -1112,12 +1112,47 @@
+ // buffer in a sparse pool whose pages are not all mapped has no host alias for the missing ones (reading the alias
+ // stops the host with SIGBUS, as the texture path above says), and a binding that reaches past its pool ends in memory
+ // that is not there at all.  The pages that are not there read as 0, which no projection matrix is made of.
++// Whether the host pages at [p, p+n) are really there.  The range of a pool can reach past its storage (a virtual
++// pool that borrows a physical pool's memory declares its own, larger size), and the pages behind the end of that
++// storage are not mapped: nvn_host_readable() does not see that (it knows the sparse virtual pools only) and
++// mtl_addr() only knows the declared range, so reading there stops the host with SIGSEGV (Odyssey's uniform buffer
++// with the projection in it: the copy of its bytes).  The kernel is asked about the pages, and the answer is kept per
++// page; a pool that changed (a sparse pool's unmap) drops the answers.
++enum { HP_PAGES = 64 };
++static int host_range_there(uint64_t p, uint64_t n) {
++    static uint64_t g_gen; static struct { uint64_t page; int ok; } g_hp[HP_PAGES];
++    uint64_t gen = atomic_load(&g_pool_gen);
++    if (gen != g_gen) { g_gen = gen; memset(g_hp, 0, sizeof g_hp); }
++    uint64_t left = n;
++    while (left) {
++        uint64_t page = p >> 12, base = p & ~(uint64_t)0xFFF;
++        unsigned s = (unsigned)((page * 0x9E3779B97F4A7C15ull) >> (64 - 6));
++        int ok;
++        if (g_hp[s].page == page + 1) ok = g_hp[s].ok;
++        else {
++            vm_size_t rs = 0; vm_region_basic_info_data_64_t vi; mach_msg_type_number_t cnt = VM_REGION_BASIC_INFO_COUNT_64; mach_port_t obj = MACH_PORT_NULL;
++            vm_address_t r = (vm_address_t)base;
++            ok = vm_region_64(mach_task_self(), &r, &rs, VM_REGION_BASIC_INFO_64, (vm_region_info_t)&vi, &cnt, &obj) == KERN_SUCCESS
++                 && cnt >= VM_REGION_BASIC_INFO_COUNT_64 && (vi.protection & VM_PROT_READ)
++                 && r <= (vm_address_t)base && (vm_address_t)base + 0x1000 <= r + rs;
++            g_hp[s].page = page + 1; g_hp[s].ok = ok;
++        }
++        if (!ok) return 0;
++        uint64_t inpage = 0x1000 - (p & 0xFFF); if (inpage > left) inpage = left;
++        p += inpage; left -= inpage;
++    }
++    return 1;
++}
+ static void proj_copy(uint64_t addr, uint64_t len, void *dst) {
+     uint8_t *out = dst;
+     for (uint64_t o = 0; o < len; o += 0x1000) {
+         uint64_t chunk = len - o < 0x1000 ? len - o : 0x1000;
+         void *mb; uint64_t mo;
+-        if (nvn_host_readable(addr + o, chunk) && mtl_addr(addr + o, chunk, &mb, &mo)) memcpy(out + o, (const uint8_t *)mb + mo, chunk);
++        if (nvn_host_readable(addr + o, chunk) && mtl_addr(addr + o, chunk, &mb, &mo)) {
++            const uint8_t *src = (const uint8_t *)mb + mo;
++            if (host_range_there((uint64_t)(uintptr_t)src, chunk)) memcpy(out + o, src, chunk);
++            else memset(out + o, 0, chunk);
++        }
+         else memset(out + o, 0, chunk);
+     }
+ }
+@@ -4717,8 +4752,9 @@
+ // array, with the rows at consecutive slots). Its slot index is what such a change needs, and the matrix itself is not in the binary, so it is looked for in the data: four
+ // consecutive float4 slots where one of the last two carries the -1 of the perspective w row (or column, depending on the layout) and the first two carry the x and y scales of
+ // a 45-90 degree vertical field of view. Nothing is changed; the probe only reads and logs. It scans each buffer once per frame (the same buffer is bound again for every
+-// draw), so it costs little.
+-static int proj_probe_on(void) { static int v = -1; if (v < 0) { v = getenv("DM_NVN_PROJ") != NULL; if (v) MLOG("DM_NVN_PROJ: looking for the perspective matrix in the uniform buffers the vertex stage binds (read-only)"); } return v; }
++// draw), so it costs little.  DM_NVN_PROJ is read as a number: it is on when it is set to anything but 0 (as
++// DM_PROJ_WIDEN is), and off when it is unset or 0.
++static int proj_probe_on(void) { static int v = -1; if (v < 0) { const char *e = getenv("DM_NVN_PROJ"); v = e ? atoi(e) != 0 : 0; if (v) MLOG("DM_NVN_PROJ: looking for the perspective matrix in the uniform buffers the vertex stage binds (read-only)"); } return v; }
+ static uint64_t g_proj_seen[16]; static int g_proj_nseen; static uint64_t g_proj_frame;
+ static void proj_probe(int stage, int reg, uint64_t addr, uint64_t size) {
+     if (!size || size > (1u << 20)) return;
+@@ -4727,7 +4763,9 @@
+     uint64_t n = size / 16; if (n < 4) return;
+     for (int i = 0; i < g_proj_nseen; i++) if (g_proj_seen[i] == addr) return;   // already scanned this frame
+     if (g_proj_nseen < 16) g_proj_seen[g_proj_nseen++] = addr; else return;
+-    const float *f = (const float *)addr;
++    static float pbuf[(1u << 20) / 4];   // the bytes as they are read: the probe never touches the guest's memory
++    proj_copy(addr, size, pbuf);
++    const float *f = pbuf;
+     for (uint64_t k = 0; k + 3 < n; k++) {
+         const float *r0 = f + k * 4, *r1 = r0 + 4, *r2 = r0 + 8, *r3 = r0 + 12;
+         if (!(r2[2] == -1.0f || r2[3] == -1.0f || r3[2] == -1.0f || r3[3] == -1.0f)) continue;
+@@ -4772,8 +4810,11 @@
+                 else if (ubp_get(u->addr, u->addr + ul, &g, &c)) gpu = g;
+                 else RED_ONCE(92, "a uniform update deferred inside the pass covers only part of the binding (stage %d cb%d): the content before the update is read", nvn_stage, reg); }
+             if (bl) {
++                float f4[4] = {0, 0, 0, 0};   // the first four floats of the binding: they are read the safe way, like the projection's copy
++                void *fb; uint64_t fo;
++                if (mtl_addr(u->addr, 4, &fb, &fo) && host_range_there((uint64_t)(uintptr_t)((const uint8_t *)fb + fo), 4)) memcpy(f4, (const uint8_t *)fb + fo, 4);
+                 PD("B %llu st%d cb reg%d addr=%#llx size=%llu pool=%#llx+%#llx f=%g,%g,%g,%g", g_stat_pass, nvn_stage, reg, (unsigned long long)u->addr, (unsigned long long)u->size,
+-                   (unsigned long long)(u->addr - mo), (unsigned long long)mo, ((float *)u->addr)[0], ((float *)u->addr)[1], ((float *)u->addr)[2], ((float *)u->addr)[3]);
++                   (unsigned long long)(u->addr - mo), (unsigned long long)mo, f4[0], f4[1], f4[2], f4[3]);
+                 // DM_NVN_CBDUMP=directory: also saves the whole uniform block to disk as-is (F<frame>_p<pass>_st<stage>_cb<slot>_<address>.bin), for the ground-truth side to compare byte by byte by guest address
+                 // DM_NVN_CBDUMP_KEY=shader key: only save for draws using that shader (any stage)
+                 static const char *cbd, *cbk; static int cbd_init; if (!cbd_init) { cbd = getenv("DM_NVN_CBDUMP"); cbk = getenv("DM_NVN_CBDUMP_KEY"); cbd_init = 1; }

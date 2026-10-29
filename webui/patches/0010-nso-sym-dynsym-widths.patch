@@ -1,0 +1,59 @@
+diff --git a/dm/tools/nso_syms.py b/dm/tools/nso_syms.py
+--- a/dm/tools/nso_syms.py
++++ b/dm/tools/nso_syms.py
+@@ -17,20 +17,48 @@
+         img[mo:mo + sz] = raw
+     return bytes(img)
+ 
++def dyn_tags(img, dyn):
++    """The NSO dynamic section.  Most SDKs write 16-byte entries (u32 tag, u32 pad, u64 value);
++    others write 8-byte (u32 tag, u32 value), and a 16-byte read of those yields stray tags.
++    SYMTAB, STRTAB and SYMENT tell the two widths apart."""
++    for stride in (16, 8):
++        tags = {}
++        for i in range(4096):
++            off = dyn + i * stride
++            if off + stride > len(img): break
++            t = struct.unpack_from('<I', img, off)[0]
++            if t == 0 or t > 0x70000000: break      # DT_NULL, or not a tag at all: wrong width
++            v = struct.unpack_from('<Q', img, off + 8)[0] if stride == 16 else struct.unpack_from('<I', img, off + 4)[0]
++            tags.setdefault(t, v)
++        if 5 in tags and 6 in tags and symtab_ok(img, tags): return tags
++    return tags
++
++def symtab_ok(img, tags):
++    """The symbols must fit between SYMTAB and STRTAB: the check that tells the two widths apart."""
++    symtab, strtab = tags[6], tags[5]
++    syment = tags.get(11, 24)                      # DT_SYMENT: 24 (Elf64_Sym) or 16 (Elf32_Sym)
++    if syment not in (16, 24) or strtab <= symtab or strtab >= len(img): return False
++    if 4 in tags:
++        if tags[4] + 8 > len(img): return False
++        return symtab + struct.unpack_from('<I', img, tags[4] + 4)[0] * syment <= strtab
++    return (strtab - symtab) % syment == 0
++
+ def dynsyms(img):
+     mod0 = struct.unpack_from('<I', img, 4)[0]
+     assert img[mod0:mod0 + 4] == b'MOD0', 'no MOD0'
+     dyn = mod0 + struct.unpack_from('<i', img, mod0 + 4)[0]
+-    tags = {}
+-    for i in range(4096):
+-        t, v = struct.unpack_from('<qQ', img, dyn + i * 16)
+-        if t == 0: break
+-        tags.setdefault(t, v)
++    tags = dyn_tags(img, dyn)
+     symtab, strtab = tags[6], tags[5]
+-    n = struct.unpack_from('<I', img, tags[4] + 4)[0] if 4 in tags else (strtab - symtab) // 24
++    syment = tags.get(11, 24)
++    n = struct.unpack_from('<I', img, tags[4] + 4)[0] if 4 in tags else (strtab - symtab) // syment
+     out = []
+     for i in range(1, n):
+-        name, info, other, shndx, value, size = struct.unpack_from('<IBBHQQ', img, symtab + i * 24)
++        entry = img[symtab + i * syment: symtab + (i + 1) * syment]
++        if len(entry) < syment: break
++        if syment >= 24:
++            name, info, other, shndx, value, size = struct.unpack_from('<IBBHQQ', entry, 0)
++        else:
++            name, value, size, info, other, shndx = struct.unpack_from('<IIIBBH', entry, 0)
+         s = img[strtab + name:img.index(b'\0', strtab + name)].decode('latin1')
+         if s: out.append((s, shndx != 0, info >> 4))
+     return out

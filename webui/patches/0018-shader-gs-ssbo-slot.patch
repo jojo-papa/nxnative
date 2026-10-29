@@ -1,0 +1,80 @@
+diff --git a/dm/gfx/tools/dmsh_build.py b/dm/gfx/tools/dmsh_build.py
+--- a/dm/gfx/tools/dmsh_build.py
++++ b/dm/gfx/tools/dmsh_build.py
+@@ -56,9 +56,9 @@
+ #   c2 0x120 + 8 r: images (nvnCommandBufferBindImage), slot r < 8
+ #   c2 0x168 + 8 r: separate textures (nvnCommandBufferBindSeparateTexture), reported as slot 128 + r, where the host binds them (hle_nvn.c, NVN_SEPTEX_SLOT0); Unity, Unreal and RE Engine bind these
+ #   c2 0x568 + 8 r: separate samplers (nvnCommandBufferBindSeparateSampler), slot r < 128
+-#   c0 base + 0x10 r: storage buffer r (64-bit address, 32-bit size), base vertex 0x110, compute 0x310, pixel 0x510 (the hull / domain stages' bases were never seen)
++#   c0 base + 0x10 r: storage buffer r (64-bit address, 32-bit size), base vertex 0x110, compute 0x310, geometry 0x410, pixel 0x510 (the hull / domain stages' bases were never seen)
+ TEX_BASE, IMG_BASE, IMG_SLOTS, SEPTEX_BASE, SEPTEX_SLOT0, SAMP_BASE = 0x20, 0x120, 8, 0x168, 128, 0x568
+-SSBO = {'vs': 0x110, 'cs': 0x310, 'ps': 0x510}
++SSBO = {'vs': 0x110, 'cs': 0x310, 'gs': 0x410, 'ps': 0x510}
+ 
+ def records(d):
+     r = [m.start() for m in re.finditer(b'BTCDBTCD', d)]
+@@ -484,7 +484,7 @@
+                 e['fetch1d'] = True
+                 if re.search(r'\b%s\.get_width\(' % re.escape(nm), msl): e['fetch1d_size'] = True   # also size-queried: a texture buffer of more than 16384 elements reports 16384 there
+         binds.append(e)
+-    # Storage buffers: SPIR-V binding number → c0 offset → NVN storage buffer slot (c0 base: vertex 0x110, compute 0x310, pixel 0x510, 0x10 per slot)
++    # Storage buffers: SPIR-V binding number → c0 offset → NVN storage buffer slot (c0 base: vertex 0x110, compute 0x310, geometry 0x410, pixel 0x510, 0x10 per slot)
+     base = SSBO.get(stage)   # storage buffer base for the hull / domain stages has not been measured: a storage buffer there is reported with no slot
+     sb_sorted = sorted(res['sbufs'], key=lambda b: b['binding'])
+     for e in binds:
+@@ -496,7 +496,7 @@
+             elif b and b['cb_slot'] >= 3:   # the address is in the game's own uniform buffer c[n] = uniform slot n - 3 (Monster Hunter Rise's compute shaders: c3 + 0x38); the replay reads it there
+                 e.update(kind='sbuf_ubo', reg=b['cb_slot'] - 3, off=b['cb_offset'] * 4)
+             else: e['reg'] = (off - base) // 16 if off is not None and base is not None and 0 <= off - base < 0x100 and (off - base) % 16 == 0 else None
+-            e['rw'] = bool(b and b['flags'] & 2)
++            e['rw'] = bool(b and b['flags'] & 1)   # BufferUsageFlags.Write; Program.cs serializes the translator enum unchanged (atomics count as writes too)
+     return binds
+ 
+ DRV_FILL = {0: [(b, b + 0x100) for b in sorted(SSBO.values())],   # c0: storage buffer address tables (vertex / compute / pixel, 16 slots × 0x10 each)
+@@ -749,28 +749,24 @@
+     Resources retain logical NVN stage 2 even though Metal executes a kernel.
+     """
+     code = open(j['code'], 'rb').read()
+-    w2, w3, w4 = struct.unpack_from('<3I', code, 8)
+-    nv, inv, topology = w4 & 4095, w2 >> 24, w3 >> 24 & 15
+-    if topology not in (1, 6, 7) or not nv or not inv:
+-        return 'geometry failed', 'invalid output declaration', None
+-    nidx = nv * 2  # one restart after every emitted vertex, including incomplete strips
++    dmsh_geometry.output_layout(code, 0)   # validate before running the translator
+     jobs = [{**j, 'key': key + '_g' + str(t), 'geometry_topology': t} for t in range(5)]
+     jp = os.path.join(w, key + '_geometry.json'); atomic_json(jp, jobs)
+     rx = subprocess.run([XLATE, jp, w], capture_output=True, text=True)
+     if rx.returncode: return 'geometry failed', rx.stderr.strip()[:160], None
+     base = None
+     for t, job in enumerate(jobs):
++        layout = dmsh_geometry.output_layout(code, t)
+         k = job['key']; spv = os.path.join(w, k + '.spv')
+         dmsh_geometry.flatten_sets(spv)
+         r = subprocess.run(['spirv-cross', *XC, spv], capture_output=True, text=True)
+         if r.returncode: return 'geometry MSL failed', r.stderr.strip()[:160], None
+-        src = dmsh_geometry.topology_pointer(precise(r.stdout))
++        src = dmsh_geometry.capture_input(dmsh_geometry.topology_pointer(precise(r.stdout)))
+         res = json.load(open(os.path.join(w, k + '.res.json')))
+         refl = {'key': key + '_bg' + str(t), 'route': 'B', 'chain': CHAIN, 'dm_ctl': key,
+                 'source': f'{loc[key][0]}#{loc[key][1]}', 'pc_paired': pc_of[key], 'stage': 'gs',
+                 'entry': 'main0', 'msl_entry_kind': 'kernel', 'threadgroup_size': [32, 1, 1],
+-                'geometry': {'vertices': nv, 'invocations': inv, 'output': topology,
+-                             'stride': res['geometry_stride'], 'index_stride': nidx},
++                'geometry': dict(layout, stride=res['geometry_stride']),
+                 'c1': c1.hex(), 'notes': res['notes'], 'drv_reads': drv_reads(src), 'drv_unfillable': [],
+                 'bindings': reflect(key, 'gs', src, res), 'vertex_inputs': [], 'raster': {}}
+         def save(suffix, text, meta):
+@@ -787,11 +783,11 @@
+             spv = os.path.join(w, k + '.reader.spv'); dmsh_geometry.flatten_sets(spv)
+             r = subprocess.run(['spirv-cross', *XC, spv], capture_output=True, text=True)
+             if r.returncode: return 'geometry reader failed', r.stderr.strip()[:160], None
+-            reader = vs_layer(vs_init(precise(r.stdout)))
++            reader = vs_layer(vs_init(dmsh_geometry.reader(precise(r.stdout))))
+             analysis, full = vs_depth(reader)
+             meta = {'key': key + '_bgv', 'route': 'B', 'chain': CHAIN, 'dm_ctl': key,
+                     'stage': 'vs', 'entry': 'main0', 'entry_z': 'main0_z', 'msl_entry_kind': 'vertex',
+-                    'geometry_reader': True, 'geometry_output': topology, 'c1': '', 'notes': [], 'drv_reads': {}, 'drv_unfillable': [],
++                    'geometry_reader': True, 'geometry_output': layout['output'], 'c1': '', 'notes': [], 'drv_reads': {}, 'drv_unfillable': [],
+                     'bindings': reflect(key, 'vs', analysis, {'sbufs': []}), 'vertex_inputs': [], 'raster': {}}
+             save('_bgv', full, meta)
+     return 'ok', '', base

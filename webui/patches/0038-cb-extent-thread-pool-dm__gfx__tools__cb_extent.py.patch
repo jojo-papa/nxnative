@@ -1,0 +1,28 @@
+diff --git a/dm/gfx/tools/cb_extent.py b/dm/gfx/tools/cb_extent.py
+--- a/dm/gfx/tools/cb_extent.py
++++ b/dm/gfx/tools/cb_extent.py
+@@ -6,9 +6,9 @@
+ # The host (nvn_mtl.m cb_ext) reads only that much of a binding when it has to copy one: a uniform block the game updates in part inside a render pass (ubp_get). Breath of the Wild binds
+ # a 64 KiB block to the vertex stage and updates its first 64 bytes 221 times a frame, while its vertex shaders read at most 544 bytes of it.
+ # The host loads the table only when its header names its library's chain version and inputs stamp (like c1_full.tsv); dmsh_build.py makes it after each full build
++import concurrent.futures
+ import datetime
+ import json
+-import multiprocessing
+ import os
+ import re
+ import sys
+@@ -85,7 +85,12 @@
+         raise SystemExit(f"usage: {sys.argv[0]} <dmsh_b version dir> <output tsv>")
+     version_dir, output = map(os.path.abspath, sys.argv[1:])
+     paths = [os.path.join(version_dir, n) for n in sorted(os.listdir(version_dir)) if n.endswith("_b.json")]
+-    with multiprocessing.Pool() as pool: rows = [r for r in pool.map(row, paths, chunksize=64) if r]
++    # The pool was a process pool. On Windows its result handler thread could die and leave the
++    # parent waiting for a result that never came: the build hung here with every worker idle,
++    # no CPU spent and no file written. The step reads one small file per shader and matches a
++    # few patterns in it, so threads do the same work without the pipes between the processes.
++    with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
++        rows = [r for r in pool.map(row, paths) if r]
+     slots, ro = sum(r.count(":") for r in rows), sum(len(re.findall(r"\bs\d+", r.split("\t", 1)[1])) for r in rows)
+     os.makedirs(os.path.dirname(output), exist_ok=True)
+     with open(output, "w", encoding="utf-8", newline="") as stream:

@@ -1,0 +1,47 @@
+diff --git a/dm/host/hle_sf.c b/dm/host/hle_sf.c
+--- a/dm/host/hle_sf.c
++++ b/dm/host/hle_sf.c
+@@ -1,8 +1,11 @@
+ // Services whose client a game links into its own main (nn::sf::hipc): Animal Crossing: New Horizons 3.0.3 carries the clients of olsc:u (cloud save data backup settings,
+ // main+0x404bc6c) and npns (push notifications). The SDK's client code connects through sm (an abort in sm::Initialize under InitializeHipcServiceResolution, from main+0x5b8198) and talks
+-// HIPC through svcSendSyncRequest; the host has neither. It hands out sessions of its own instead and answers each request in the message buffer, for the services listed in sf_served:
+-// success, the output data zeroed, no objects or handles. For olsc that reads as "backup off for every user", so the game leaves the settings alone (main+0x2809c8c asks per user and
+-// switches backup off where it is on). Any other service name is refused with a red line, as sm refuses a service that is not registered.
++// HIPC through svcSendSyncRequest; the host has neither. It hands out sessions of its own instead and answers each request in the message buffer, for every service the game
++// asks for: success, the output data zeroed, no objects or handles. For olsc that reads as "backup off for every user", so the game leaves the settings alone (main+0x2809c8c
++// asks per user and switches backup off where it is on).
++// A refusal is fatal, so there is none: the SDK's own client code keeps the handle it was given and walks on it. Super Mario Odyssey links the hid client into its own
++// main; the connect was refused and the SDK dereferenced the null session (SIGSEGV, the process went down a few minutes into the game, always at sdk+0x24254c). A session
++// that answers every request with zeros keeps the game alive: it sees a service that has nothing in it.
+ // The SDK's own client functions are taken over where they reach the kernel (their calls inside sdk go through its PLT): the session manager's CreateNewSession runs natively on
+ // DuplicateSession, and ConvertToDomainImpl on QueryPointerBufferSize and ConvertSessionToDomain. DM_SF_TRACE=1 dumps every request.
+ // Message layout (Atmosphère / libnx): HIPC header {u16 type, counts of X / A / B / W descriptors; u32 data words, receive list, special header flag}, the special header and descriptors,
+@@ -15,7 +18,7 @@
+ #define SF_MAX 64
+ static struct { char name[16]; int used, domain; unsigned seen; } g_sf[SF_MAX];
+ static pthread_mutex_t g_sf_mu = PTHREAD_MUTEX_INITIALIZER;
+-static const char *const sf_served[] = {"olsc:u"};
++static const char *const sf_served[] = {"olsc:u", "hid"};   // the services the host knows; any other one is answered too, but it gets a red line
+ 
+ static int sf_slot(uint32_t h) {
+     unsigned i = h - SF_H0;
+@@ -32,12 +35,14 @@
+ 
+ HLE_FORCE("_ZN2nn2sf4hipc31InitializeHipcServiceResolutionEv", "service name resolution (connects to sm); the host resolves the names it serves itself", Result, h_sf_InitRes, void) { return RES_OK; }
+ HLE_FORCE("_ZN2nn2sf4hipc29FinalizeHipcServiceResolutionEv", "service name resolution (sm)", void, h_sf_FinRes, void) {}
+-HLE_FORCE("_ZN2nn2sf4hipc20ConnectToHipcServiceEPNS_3svc6HandleEPKc", "connect to a service through sm → a host session for the services the host serves", Result, h_sf_Connect,
++HLE_FORCE("_ZN2nn2sf4hipc20ConnectToHipcServiceEPNS_3svc6HandleEPKc", "connect to a service through sm → a host session for every service the game asks for", Result, h_sf_Connect,
+           uint32_t *out, const char *name) {
+-    for (size_t k = 0; k < sizeof sf_served / sizeof *sf_served; k++)
+-        if (!strncmp(name, sf_served[k], 8)) { *out = sf_new(sf_served[k], 0); LOG("sf: %s → host session %#x (every request succeeds with zeroed output)", sf_served[k], *out); return RES_OK; }
+-    LOG("[RED] sf: the game connects to service %.8s itself, which the host does not serve", name);
+-    return 0xe15u;   // sm ResultNotRegistered
++    int known = 0;
++    for (size_t k = 0; k < sizeof sf_served / sizeof *sf_served; k++) if (!strncmp(name, sf_served[k], 8)) { known = 1; break; }
++    if (!known) LOG("[RED] sf: the game connects to service %.8s itself; the host answers it with an empty session", name);
++    *out = sf_new(name, 0);
++    LOG("sf: %.8s → host session %#x (every request succeeds with zeroed output)", name, *out);
++    return RES_OK;
+ }
+ HLE_FORCE("_ZN2nn2sf4hipc24CloseClientSessionHandleENS_3svc6HandleE", "close a session (kernel handle) → the host session", void, h_sf_Close, uint32_t h) {
+     int i = sf_slot(h);

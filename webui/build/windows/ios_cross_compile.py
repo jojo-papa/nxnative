@@ -10,6 +10,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
+import shutil
 import subprocess
 import sys
 
@@ -55,10 +56,18 @@ def main():
     ap.add_argument('--cpu', default='apple-a16')
     ap.add_argument('--jobs', type=int, default=4)
     ap.add_argument('--only', help='Compile only repository-relative paths matching this regex')
+    ap.add_argument('--chain-header', type=Path,
+                    help='Chain version header the host must be compiled with (the Windows shader chain version, '
+                         'not the repository\'s Mac one). A source that includes the chain version header is '
+                         'compiled from a shadow copy that carries this header, so the host loads the Windows '
+                         'shader libraries and no other.')
     args = ap.parse_args()
     repo = Path(__file__).resolve().parents[3]
     out, profile, sdk, clang = (p.resolve() for p in
                                 (args.out, args.profile, args.sdk, args.clang))
+    chain_header = args.chain_header.resolve() if args.chain_header else None
+    if chain_header and not chain_header.is_file():
+        ap.error('The chain version header does not exist: ' + str(chain_header))
     sources = source_list(repo)
     if args.only:
         sources = [p for p in sources if re.search(args.only, p.relative_to(repo).as_posix())]
@@ -81,15 +90,36 @@ def main():
     common = [str(clang), '-target', 'arm64-apple-ios26.0', '-isysroot', str(sdk),
               '-F', str(sdk / 'System/Library/SubFrameworks'),
               '-DUSE_UIKIT_PUBLIC_HEADERS=1', '-fobjc-arc', f'-mcpu={args.cpu}',
-              '-O1', '-g', '-Wno-deprecated-declarations', '-Wno-unused-function']
+              '-O1', '-g', '-Wno-deprecated-declarations', '-Wno-unused-function',
+              # Clang 20 turned this into an error; Apple's clang only warns, and the sources rely on it
+              '-Wno-incompatible-pointer-types']
     common += [f'-I{p}' for p in dict.fromkeys(includes)]
+
+    def shadowed(source):
+        """The file clang compiles. The chain version header is included from the source's own directory, so a
+        source that includes it is compiled from a shadow copy that carries the given header; every other
+        include still resolves through the repository's include paths."""
+        if chain_header is None:
+            return source
+        try:
+            if 'dmsh_chain.h' not in source.read_text(encoding='utf-8', errors='replace'):
+                return source
+        except OSError:
+            return source
+        target = out / 'shadow' / source.relative_to(repo)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, target)
+        shutil.copyfile(chain_header, target.parent / 'dmsh_chain.h')
+        return target
+
+    shadowed_sources = {source: shadowed(source) for source in sources}
 
     def compile_one(source):
         relative = source.relative_to(repo).as_posix()
         name = relative.replace('/', '__') + '.o'
         obj = out / 'objects' / name
         command = common + (['-Dmain=dm_main'] if relative == 'dm/host/main.c' else [])
-        command += ['-c', str(source), '-o', str(obj)]
+        command += ['-c', str(shadowed_sources[source]), '-o', str(obj)]
         log = out / 'logs' / (name + '.log')
         with log.open('w', encoding='utf-8') as output:
             process = subprocess.run(command, stdout=output, stderr=subprocess.STDOUT)

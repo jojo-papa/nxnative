@@ -1,0 +1,72 @@
+diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
+--- a/dm/gfx/nvn/nvn_mtl.m
++++ b/dm/gfx/nvn/nvn_mtl.m
+@@ -1067,6 +1067,7 @@
+ typedef struct { uint64_t addr; uint64_t slot; uint64_t frame; int col; int found; } proj_buf;   // a uniform buffer the vertex stage binds
+ enum { PROJ_MAX = 64, PROJ_SCAN_SLOTS = 1024 };   // the first 16 KB of a buffer; the projection sits at the front of it
+ static proj_buf g_proj_buf[PROJ_MAX]; static int g_proj_nbuf;
++static uint64_t g_proj_shadow_n, g_proj_shadow_logged;
+ // The perspective matrix at a slot of a uniform buffer: four consecutive float4 rows. Row-major, the w row is the last one
+ // (its z is the -1 of the perspective); column-major, the -1 is the w component of the third row. The x and y scales are in
+ // the first two rows in both layouts.
+@@ -1151,6 +1152,32 @@
+             *fp *= g_proj_scale;
+         }
+     }
++}
++
++// DM_PROJ_WIDEN: a buffer the game writes itself (its own memory pool, mapped, so the bytes never travel through the
++// host's update path) keeps the game's own matrix, and the GPU would read it unscaled: the 2D interface is then
++// stretched by the difference between the screen's aspect and the picture's.  For such a buffer the host binds a copy
++// of it with the x scale corrected.  The game's own memory stays exactly as the game wrote it, so the game still
++// computes its 2D layout and its touch hit boxes from the matrix it wrote itself.
++static id<MTLBuffer> proj_shadow(uint64_t addr, uint64_t size, uint64_t *gpu_out) {
++    if (!g_proj_scale || g_proj_scale == 1.0f || !size) return nil;
++    for (int i = 0; i < g_proj_nbuf; i++) {
++        if (!g_proj_buf[i].found || g_proj_buf[i].addr != addr) continue;
++        uint64_t base = g_proj_buf[i].addr + g_proj_buf[i].slot * 16;
++        if (base < addr || base + 16 > addr + size) continue;
++        id<MTLBuffer> buf; size_t off = arena_alloc((size_t)size, &buf);
++        uint8_t *dst = (uint8_t *)buf.contents + off;
++        memcpy(dst, (const void *)addr, (size_t)size);
++        for (int j = 0; j < 4; j++) {
++            uint64_t fa = base + (g_proj_buf[i].col ? (uint64_t)j * 16 : (uint64_t)j * 4);   // the x scale of the row, or the x component of the column
++            if (fa + 4 > addr + size) continue;
++            *(float *)(dst + (fa - addr)) *= g_proj_scale;
++        }
++        *gpu_out = buf.gpuAddress + off;
++        g_proj_shadow_n++;
++        return buf;
++    }
++    return nil;
+ }
+ 
+ void mtl_sub_update(const void *data, uint64_t dst, uint64_t n) {
+@@ -4753,6 +4780,18 @@
+                 uint64_t g; const uint8_t *c; if (ubd_covers(u->addr, u->addr + ul)) gpu = ubd_shadow(u->addr, u->addr + ul);
+                 else if (ubp_get(u->addr, u->addr + ul, &g, &c)) gpu = g;
+                 else RED_ONCE(92, "a uniform update deferred inside the pass covers only part of the binding (stage %d cb%d): the content before the update is read", nvn_stage, reg); }
++            // DM_PROJ_WIDEN: a buffer the game writes itself never travels through the host's update path, so its matrix
++            // would reach the GPU unscaled (the 2D interface then stretched by the screen's aspect).  Bind a copy of it
++            // with the x scale corrected; the game's own memory stays as the game wrote it.
++            id<MTLBuffer> pshadow = nil;
++            if (proj_widen_on() && nvn_stage == 0 && !(g_nubd && ubd_hits(u->addr, u->addr + ul))) {
++                pshadow = proj_shadow(u->addr, ul, &gpu);
++                uint64_t fr = atomic_load(&g_cur_frame);
++                if (pshadow && fr - g_proj_shadow_logged >= 300) {
++                    g_proj_shadow_logged = fr;
++                    MLOG("DM_PROJ_WIDEN: %llu uniform bindings in total were bound a scaled copy of the game's own buffer", (unsigned long long)g_proj_shadow_n);
++                }
++            }
+             if (bl) {
+                 PD("B %llu st%d cb reg%d addr=%#llx size=%llu pool=%#llx+%#llx f=%g,%g,%g,%g", g_stat_pass, nvn_stage, reg, (unsigned long long)u->addr, (unsigned long long)u->size,
+                    (unsigned long long)(u->addr - mo), (unsigned long long)mo, ((float *)u->addr)[0], ((float *)u->addr)[1], ((float *)u->addr)[2], ((float *)u->addr)[3]);
+@@ -4765,7 +4804,7 @@
+                 }
+             }
+             slots[aid] = gpu;
+-            USE((__bridge id<MTLBuffer>)mb, MTLResourceUsageRead);
++            USE(pshadow ? pshadow : (__bridge id<MTLBuffer>)mb, MTLResourceUsageRead);
+         } else if (b->kind == NVN_RB_SAMPU && b->n) {   // the samplers of an array of handles in a uniform buffer: element k = the sampler ID of the handle at byte 8k (see the textures below)
+             for (int k = 0; k < b->n; k++) {   // only registered IDs are looked up: most elements are other data the shader never picks as a handle
+                 int sid = ubo_samp_id(ubo_handle(nvn_stage, reg, 8 * k)); if (sid >= g_nsreg || !g_sreg_ok[sid]) sid = 0;

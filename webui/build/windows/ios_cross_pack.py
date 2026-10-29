@@ -9,6 +9,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import zipfile
 
 
@@ -34,6 +35,9 @@ def base_info_plist(*, game_id, display_name, app_version, app_category):
         UILaunchScreen={},
         UIFileSharingEnabled=True,
         LSSupportsOpeningDocumentsInPlace=True,
+        # the launcher's "background picture" row opens the photo library (the picture goes into the
+        # bars around the game); iOS refuses to open the picker without this
+        NSPhotoLibraryUsageDescription='选择一张图片，作为游戏画面四周黑边的背景。',
         UISupportedInterfaceOrientations=['UIInterfaceOrientationLandscapeRight',
                                           'UIInterfaceOrientationLandscapeLeft'],
         UIRequiresFullScreen=True,
@@ -80,18 +84,37 @@ def main():
     chain = re.search(r'#define DMSH_CHAIN "([a-f0-9]+)"', g.table('dmsh_chain.h').read_text()).group(1)
     stage = a.host / 'package_resources'
     dm = stage / 'dm'
+
+    def copy_text(source, target):
+        """Copy a text table with LF line endings.
+
+        The tables are written by Python's text mode, which turns every newline
+        into CRLF on Windows.  The host reads them by splitting on "\\n", so a
+        field at the end of a line keeps the "\\r" and no longer compares equal
+        to what it should: the library's stamp (msl/b-<chain>/inputs.tsv) then
+        says "built for game 0100000000010000\\r, not 0100000000010000" and the
+        host takes neither c1_full.tsv nor cb_extent.tsv, which costs every
+        shader with a c1 a buffer of its own (64 KiB each).
+        """
+        data = source.read_bytes().replace(b'\r\n', b'\n').replace(b'\r', b'\n')
+        target.write_bytes(data)
+
     (dm / 'font').mkdir(parents=True, exist_ok=True)
-    if a.env_file: shutil.copyfile(a.env_file, dm / 'env.txt')
+    if a.env_file: copy_text(a.env_file, dm / 'env.txt')
     else: (dm / 'env.txt').unlink(missing_ok=True)
-    if a.launch_defaults: shutil.copyfile(a.launch_defaults, stage / 'launch-defaults.json')
+    if a.launch_defaults: copy_text(a.launch_defaults, stage / 'launch-defaults.json')
     else: (stage / 'launch-defaults.json').unlink(missing_ok=True)
     for pattern in ('*.fixups.tsv', '*.gates.tsv', '*.params.tsv', '*.cuts.tsv', '*.obs.tsv'):
         for source in a.patched.glob(pattern):
-            shutil.copyfile(source, dm / source.name)
-    for filename in ('shader_map.tsv', 'pso_manifest.tsv', 'c1_full.tsv'):
-        if a.prepare_only and not g.table(filename).exists():
-            continue
-        shutil.copyfile(g.table(filename), dm / filename)
+            copy_text(source, dm / source.name)
+    for filename in ('shader_map.tsv', 'pso_manifest.tsv', 'c1_full.tsv', 'cb_extent.tsv'):
+        table = g.table(filename)
+        if not table.exists():
+            # cb_extent.tsv is optional: without it the host copies whole uniform bindings
+            if filename == 'cb_extent.tsv' or a.prepare_only:
+                continue
+            raise FileNotFoundError(str(table))
+        copy_text(table, dm / filename)
     shutil.copyfile(a.font, dm / 'font/standard.ttf')
     subprocess.run([sys.executable, str(repo / 'dm/tools/make_ext_font.py'), str(dm / 'font/nintendo_ext.ttf'), str(a.letter_font)], check=True)
     plist = base_info_plist(
@@ -152,7 +175,22 @@ def main():
         if root:
             files += [(p, '/'.join(x for x in (prefix, p.relative_to(root).as_posix()) if x))
                       for p in sorted(root.rglob('*')) if p.is_file() and
-                      (root != shader_dir or re.fullmatch(r'[0-9a-f]{16}_bf?\.(metallib|json)', p.name))]
+                      (root != shader_dir or re.fullmatch(r'[0-9a-f]{16}_bf?\.(metallib|json)', p.name)
+                       # The library's stamp (inputs.tsv): the host takes c1_full.tsv / cb_extent.tsv only when their
+                       # header names this stamp, and without it every c1 gets a buffer of its own (64 KiB each)
+                       or p.name == 'inputs.tsv')]
+    # The stamp is read by the host as text, so it goes into the archive with LF line endings.
+    # It is written beside its source (the collection above is already done, so the extra file
+    # is not picked up) and removed again when the archive is written.
+    stamp_fixed = None
+    stamped = []
+    for source, name in files:
+        if source.name == 'inputs.tsv':
+            stamp_fixed = source.with_name(source.name + '.lf')
+            copy_text(source, stamp_fixed)
+            source = stamp_fixed
+        stamped.append((source, name))
+    files = stamped
     names = [n for _, n in files]
     if len(set(names)) != len(names):
         raise ValueError('Duplicate bundle path')
@@ -184,6 +222,8 @@ def main():
             if digest.hexdigest() != hashes[info.filename]:
                 raise ValueError('IPA content verification failed: ' + info.filename)
     temporary.replace(a.out)
+    if stamp_fixed is not None:
+        stamp_fixed.unlink(missing_ok=True)
     report = dict(ipa=str(a.out.resolve()), bytes=a.out.stat().st_size, files=len(files),
                   shader_keys=len(keys), chain=chain, signed=False, minimum_ios='26.0',
                   missing_shader_keys=missing, unresolved_binding_shaders=unresolved,

@@ -1,0 +1,46 @@
+diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
+--- a/dm/gfx/nvn/nvn_mtl.m
++++ b/dm/gfx/nvn/nvn_mtl.m
+@@ -8413,10 +8413,26 @@
+     if (crop && (crop[2] || crop[3])) {
+         if (crop[0] < 0 || crop[1] < 0 || crop[2] <= 0 || crop[3] <= 0 ||
+             (uint64_t)crop[0] + crop[2] > src.width || (uint64_t)crop[1] + crop[3] > src.height) {
+-            MLOG("[RED] present crop out of bounds: %d,%d %dx%d / source texture %lux%lu", crop[0], crop[1], crop[2], crop[3], (unsigned long)src.width, (unsigned long)src.height); return 0;
+-        }
+-        cx = crop[0]; cy = crop[1]; cw = crop[2]; ch = crop[3];
+-    }
++            MLOG("[RED] present crop out of bounds: %d,%d %dx%d / source texture %lux%lu", crop[0], crop[1], crop[2], crop[3], (unsigned long)src.width, (unsigned long)src.height);
++            // A frame that is not drawn at all leaves the drawable's contents undefined, which the player sees as a
++            // white picture, and the game keeps the same window for many frames (a cutscene that changes its own
++            // window does exactly that).  Draw the part that exists instead of dropping the frame.
++            long long x0 = crop[0] < 0 ? 0 : crop[0], y0 = crop[1] < 0 ? 0 : crop[1];
++            long long x1 = x0 + (long long)crop[2], y1 = y0 + (long long)crop[3];
++            if (x1 > (long long)src.width) x1 = (long long)src.width;
++            if (y1 > (long long)src.height) y1 = (long long)src.height;
++            if (x1 <= x0 || y1 <= y0) { MLOG("[RED] present crop is empty after clamping"); return 0; }
++            cx = (NSUInteger)x0; cy = (NSUInteger)y0; cw = (NSUInteger)(x1 - x0); ch = (NSUInteger)(y1 - y0);
++            MLOG("[RED] present crop clamped to %llu,%llu %llux%llu", (unsigned long long)cx, (unsigned long long)cy, (unsigned long long)cw, (unsigned long long)ch);
++        } else { cx = crop[0]; cy = crop[1]; cw = crop[2]; ch = crop[3]; }
++    }
++    {   // The crop and the sizes, one line when they change.  The Metal 4 path is the one the device presents with
++        // and it wrote nothing, so what the game asked for (its window) was invisible in the log.
++        static uint64_t last_meta[8]; uint64_t meta[8] = {src.width, src.height, cx, cy, cw, ch, dst.width, dst.height};
++        if (memcmp(meta, last_meta, sizeof meta)) { memcpy(last_meta, meta, sizeof meta);
++            MLOG("present crop (m4): source texture %lux%lu, valid %llu,%llu %llux%llu → target %lux%lu",
++                 (unsigned long)src.width, (unsigned long)src.height, (unsigned long long)cx, (unsigned long long)cy,
++                 (unsigned long long)cw, (unsigned long long)ch, (unsigned long)dst.width, (unsigned long)dst.height); } }
+     present_pipeline(dst.pixelFormat);
+     double dw = dst.width, dh = dst.height, s = fmin(dw / cw, dh / ch);
+     MTLViewport vp = {floor((dw - cw * s) / 2), floor((dh - ch * s) / 2), round(cw * s), round(ch * s), 0, 1};
+@@ -8428,6 +8444,11 @@
+     } else if (fill == 2) vp = (MTLViewport){0, 0, dw, dh, 0, 1};   // stretch: the aspect ratio is not kept
+     else if (fill == 3) proj_wide_viewport(dw, dh, cw, ch, &vp);   // wide: the picture fills the canvas and the field of view is widened to match
+     int full = vp.originX == 0 && vp.originY == 0 && vp.width == dw && vp.height == dh;
++    {   // The shape of the picture on the canvas, one line when it changes (the same line the classic path writes).
++        static double last_vp[4];
++        if (memcmp(last_vp, &vp, sizeof last_vp)) { memcpy(last_vp, &vp, sizeof last_vp);
++            MLOG("present viewport (m4) %.0f,%.0f %.0fx%.0f / canvas %.0fx%.0f (game image %lux%lu)",
++                 vp.originX, vp.originY, vp.width, vp.height, dw, dh, (unsigned long)src.width, (unsigned long)src.height); } }
+     MTL4RenderPassDescriptor *rp = [MTL4RenderPassDescriptor new];
+     rp.colorAttachments[0].texture = dst;
+     rp.colorAttachments[0].loadAction = full ? MTLLoadActionDontCare : MTLLoadActionClear;

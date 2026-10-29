@@ -1,0 +1,16 @@
+diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
+--- a/dm/gfx/nvn/nvn_mtl.m
++++ b/dm/gfx/nvn/nvn_mtl.m
+@@ -1119,6 +1119,12 @@
+     if (known >= 0) {
+         if (g_proj_buf[known].found) {
+             if (proj_signature(f, g_proj_buf[known].slot, g_proj_buf[known].col)) return;   // still the projection
++            // The game writes this buffer while the host reads it, so a matrix that is half written does not look like
++            // a projection any more: the correction is taken away and looked for again a second later.  In that second the
++            // picture is as wide as the game wants it to be, and it jumps when the correction comes back.  Nothing is
++            // changed here; the line says how often it happens, so that the next run on the phone tells whether it does.
++            MLOG("DM_PROJ_WIDEN: the projection in the uniform buffer at %#llx was not readable; the correction is looked for again",
++                 (unsigned long long)addr);
+             g_proj_buf[known].found = 0;
+         }
+         if (frame - g_proj_buf[known].frame < 60) return;   // not on every draw: look again later

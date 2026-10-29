@@ -1,0 +1,248 @@
+diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
+--- a/dm/gfx/nvn/nvn_mtl.m
++++ b/dm/gfx/nvn/nvn_mtl.m
+@@ -1079,7 +1079,55 @@
+ static uint64_t g_proj_shadow_n, g_proj_shadow_logged;
+ // DM_PROJ_ORTHO=0 leaves the orthographic projection of a 2D layer alone (only a camera's perspective is corrected).
+ static int proj_ortho_on(void) { static int v = -1; if (v < 0) { const char *e = getenv("DM_PROJ_ORTHO"); v = e ? atoi(e) != 0 : 1; } return v; }
+-static int proj_kind_on(int kind) { return kind == 0 ? 1 : proj_ortho_on(); }
++// DM_PROJ_2D=1 corrects the interface's own transform as well.  The menus and the text are drawn with a transform of
++// their own: the buffer holds the picture's pixel scales (1/width, 1/height, 1/(2*width), 1/(2*height)) next to a diagonal
++// matrix whose x and y scales are the same, so the shape of the interface comes from the pixel scales and not from the
++// matrix.  The present stretches the picture more in x than in y, so the interface's own x scale has to be corrected like
++// the camera's, or the letters are stretched sideways.  It is off by default: the interface's transform is only corrected
++// when the device says so (Documents/env.txt), because a wrong matrix would make the menus unreadable.
++static int proj_2d_on(void) { static int v = -1; if (v < 0) { const char *e = getenv("DM_PROJ_2D"); v = e ? atoi(e) != 0 : 0; if (v) MLOG("DM_PROJ_2D: the interface's own transform is corrected as well, so the letters keep their shape"); } return v; }
++// The picture's own size in pixels: the pixel scales of the interface are 1/width and 1/height.
++static int g_proj_src_w, g_proj_src_h;
++// Which generation of the interface's own x scale the bytes are: 0 = the game's own (a whole number), 1 = corrected once,
++// 2 = corrected twice.  The correction is never applied twice: the second time the letters would be a quarter as wide as
++// they should be.  The whole number is the game's own x scale, which the picture's coordinates are turned into.
++static int proj_2d_gen(double xs, double *own) {
++    for (int n = 0; n < 3; n++) {
++        double d = 1.0;
++        for (int j = 0; j < n; j++) d *= (double)g_proj_scale;
++        for (int k = 1; k <= 4; k++) {
++            double t = (double)k * d;
++            if (fabs(xs - t) < 1e-3 * t) { *own = (double)k; return n; }
++        }
++    }
++    return -1;
++}
++// DM_PROJ_2D: the interface's own transform in a uniform buffer.  The buffer has to hold the picture's pixel scales next
++// to a diagonal matrix, so that no other matrix is taken for it.  The matrix is diagonal, so it does not matter whether
++// it is row-major or column-major: the only number in it that is not zero is the x scale.
++static void proj_scan_2d(const float *f, uint64_t n, proj_buf *b) {
++    if (!g_proj_src_w || !g_proj_src_h) return;
++    double px = 1.0 / (double)g_proj_src_w, py = 1.0 / (double)g_proj_src_h;
++    int have = 0;
++    for (uint64_t k = 0; k + 1 < n; k++)
++        if (fabs((double)f[k] - px) <= 1e-6 * px && fabs((double)f[k+1] - py) <= 1e-6 * py) { have = 1; break; }
++    if (!have) return;   // the picture's pixel scales are not in this buffer: the interface's transform is not here
++    for (uint64_t k = 0; k + 3 < n; k++) {
++        const float *r0 = f + k * 4, *r1 = r0 + 4, *r2 = r0 + 8;
++        if (fabsf(r0[1]) > 1e-4f || fabsf(r0[2]) > 1e-4f || fabsf(r0[3]) > 1e-4f) continue;
++        if (fabsf(r1[0]) > 1e-4f || fabsf(r1[2]) > 1e-4f || fabsf(r1[3]) > 1e-4f) continue;
++        if (fabsf(r2[0]) > 1e-4f || fabsf(r2[1]) > 1e-4f) continue;
++        double own = 0.0;
++        if (proj_2d_gen(fabs((double)r0[0]), &own) < 0) continue;      // the x scale is not one of the generations
++        if (fabs(fabs((double)r1[1]) - own) > 1e-3 * own) continue;     // the y scale is the same whole number
++        if (b->n >= PROJ_SLOTS_MAX) break;
++        b->slot[b->n] = k; b->col[b->n] = 0; b->kind[b->n] = 2; b->n++;
++        break;
++    }
++}
++// The kind of a projection in a buffer: 0 = the perspective of a camera, 1 = the orthographic projection of a
++// 2D layer, 2 = the interface's own transform (the diagonal matrix next to the picture's pixel scales).
++static int proj_kind_on(int kind) { return kind == 0 ? 1 : kind == 1 ? proj_ortho_on() : proj_2d_on(); }
+ // The perspective matrix at a slot of a uniform buffer: four consecutive float4 rows. Row-major, the w row is the last one
+ // (its z is the -1 of the perspective); column-major, the -1 is the w component of the third row. The x and y scales are in
+ // the first two rows in both layouts.
+@@ -1110,20 +1158,33 @@
+     else { if (fabsf(r3[0]) > 1e-3f || fabsf(r3[1]) > 1e-3f || fabsf(r3[2]) > 1e-3f || fabsf(r3[3] - 1.0f) > 1e-3f) return 0; }
+     return fabsf(fabsf(r2[2]) - 1.0f) < 1e-2f;
+ }
++// DM_PROJ_WIDEN: the host writes the corrected matrix back into the game's own memory (the update path copies the
++// host's own copy into the game's buffer), so the game's memory holds the correction again and again: the aspect of the
++// matrix in the game's memory is the picture's own aspect (the generation the game wrote), the picture's aspect divided by
++// the scale (the generation the host corrected once) or that divided by the scale again (corrected twice).  All three are
++// the picture's own projection and all three are accepted: a generation that is not known would drop the correction, and
++// the picture would jump.
++static double proj_want_aspect(void) { return g_proj_src_aspect > 0.1 ? g_proj_src_aspect : 16.0 / 9.0; }
++static double proj_gen_aspect(int gen) {
++    double a = proj_want_aspect();
++    for (int j = 0; j < gen; j++) a /= (double)g_proj_scale;
++    return a;
++}
++// Which generation the aspect belongs to: 0 = the game's own matrix, 1 = corrected once, 2 = corrected twice, -1 = none.
++static int proj_gen_of(double a) {
++    if (g_proj_scale == 1.0f) return fabs(a - proj_want_aspect()) < 0.08 ? 0 : -1;
++    for (int gen = 0; gen < 3; gen++) {
++        double t = proj_gen_aspect(gen);
++        if (fabs(a - t) < 0.08) return gen;
++    }
++    return -1;
++}
+ // The camera's projection is the one whose aspect is the aspect of the game's own picture; a shadow map's is another one. A
+ // matrix that was scaled already has an aspect that is off by the scale factor, and counts too.
+-static int proj_aspect_ok(double a) {
+-    double want = g_proj_src_aspect > 0.1 ? g_proj_src_aspect : 16.0 / 9.0;
+-    if (fabs(a - want) < 0.08) return 1;
+-    if (g_proj_scale != 1.0f && fabs(a - want / g_proj_scale) < 0.08) return 1;
+-    return 0;
+-}
+-// The same for a 2D layer: the game's own memory always holds the uncorrected matrix, so only the picture's own aspect is
+-// accepted here (a canvas of the screen's aspect would be corrected twice).
+-static int proj_aspect_ok2d(double a) {
+-    double want = g_proj_src_aspect > 0.1 ? g_proj_src_aspect : 16.0 / 9.0;
+-    return fabs(a - want) < 0.08;
+-}
++static int proj_aspect_ok(double a) { return proj_gen_of(a) >= 0; }
++// The same for a 2D layer: on the path where the game writes the buffer itself the game's own memory keeps the
++// uncorrected matrix, on the path where the host writes it back it holds the corrected one.  Both are the picture.
++static int proj_aspect_ok2d(double a) { return proj_gen_of(a) >= 0; }
+ // DM_PROJ_WIDEN: every matrix of the shape of a projection in the buffer, not only the first one.  A buffer can hold the
+ // camera's matrix and the matrix of a 2D layer side by side, and the interface needs the same correction as the camera:
+ // the present stretches the whole picture, so every matrix that puts something in the picture has to be corrected.
+@@ -1154,18 +1215,29 @@
+     return 1;
+ }
+ // DM_PROJ_DUMP=1 writes the beginning of every uniform buffer the vertex stage binds to the app's Documents folder
+-// (projbuf_<address>.bin), once per buffer: it is how the interface's own matrix is found, whatever shape it has.
++// (projbuf_<address>.bin): it is how the interface's own matrix is found, whatever shape it has.  The buffer is written
++// again when its content changes: the first snapshot was taken when the buffer was bound for the first time, which is
++// before the game has written anything into it, so it was empty and the interface's own matrix was never seen.  Up to four
++// snapshots per buffer, so the matrix is written down as the game really has it.
+ static void proj_dump_buf(uint64_t addr, uint64_t size) {
+     static int on = -1;
+     if (on < 0) { const char *e = getenv("DM_PROJ_DUMP"); on = e && atoi(e) != 0; }
+     if (!on) return;
+-    static uint64_t seen[64]; static int nseen;
+-    for (int i = 0; i < nseen; i++) if (seen[i] == addr) return;
+-    if (nseen < 64) seen[nseen++] = addr; else return;
+-    char p[256]; snprintf(p, sizeof p, "projbuf_%llx.bin", (unsigned long long)addr);
++    enum { DUMP_MAX = 64, DUMP_SNAP = 4 };
++    static uint64_t seen[DUMP_MAX]; static uint32_t hash[DUMP_MAX]; static int nseen, nsnap[DUMP_MAX];
++    uint64_t n = size < 4096 ? size : 4096;
++    uint32_t h = 2166136261u;
++    for (uint64_t k = 0; k + 4 <= n; k += 4) { uint32_t b; memcpy(&b, (const void *)addr + k, 4); h ^= b; h *= 16777619u; }
++    int i = -1;
++    for (int j = 0; j < nseen; j++) if (seen[j] == addr) { i = j; break; }
++    if (i < 0) { if (nseen >= DUMP_MAX) return; i = nseen++; seen[i] = addr; hash[i] = h; nsnap[i] = 1; }
++    else if (hash[i] == h) return;                       // the same content as the last snapshot
++    else { if (nsnap[i] >= DUMP_SNAP) return; hash[i] = h; nsnap[i]++; }
++    char p[256];
++    if (nsnap[i] == 1) snprintf(p, sizeof p, "projbuf_%llx.bin", (unsigned long long)addr);
++    else snprintf(p, sizeof p, "projbuf_%llx_%d.bin", (unsigned long long)addr, nsnap[i] - 1);
+     FILE *f = fopen(p, "wb");
+     if (!f) { MLOG("[RED] DM_PROJ_DUMP cannot write %s", p); return; }
+-    uint64_t n = size < 4096 ? size : 4096;
+     fwrite((const void *)addr, 1, (size_t)n, f);
+     fclose(f);
+     const float *g = (const float *)addr;
+@@ -1184,16 +1256,19 @@
+     if (known >= 0 && frame - g_proj_buf[known].frame < 60) return;   // not on every draw: look again later
+     proj_buf b; memset(&b, 0, sizeof b); b.addr = addr;
+     proj_scan_all(f, n, &b);
++    proj_scan_2d(f, n, &b);   // DM_PROJ_2D: the interface's own transform, if this buffer holds it
+     b.frame = frame;
+     if (known >= 0) {
+-        if (proj_same(&g_proj_buf[known], &b)) { g_proj_buf[known].frame = frame; return; }
++        if (proj_same(&g_proj_buf[known], &b)) { g_proj_buf[known].frame = frame; proj_dump_buf(addr, size); return; }
++        uint64_t lf = g_proj_buf[known].log_frame;   // a new result does not reset the rate limit of the log
+         g_proj_buf[known] = b;
++        g_proj_buf[known].log_frame = lf;
+     } else {
+         if (g_proj_nbuf >= PROJ_MAX) return;
+         g_proj_buf[g_proj_nbuf++] = b;
+         known = g_proj_nbuf - 1;
+-        proj_dump_buf(addr, size);   // DM_PROJ_DUMP: what the buffer holds, for the next run on the phone
+-    }
++    }
++    proj_dump_buf(addr, size);   // DM_PROJ_DUMP: what the buffer holds, for the next run on the phone
+     if (frame - g_proj_buf[known].log_frame < 300) return;   // what the buffer holds is written now and then, not every time
+     g_proj_buf[known].log_frame = frame;
+     for (int i = 0; i < g_proj_buf[known].ncand; i++) {
+@@ -1205,6 +1280,11 @@
+              g_proj_buf[known].cand_col[i] ? "column-major" : "row-major",
+              r0[0], r0[1], r0[2], r0[3], r0[4], r0[5], r0[6], r0[7], r0[8], r0[9], r0[10], r0[11], r0[12], r0[13], r0[14], r0[15]);
+     }
++    for (int k = 0; k < g_proj_buf[known].n; k++) if (g_proj_buf[known].kind[k] == 2) {
++        const float *r0 = f + g_proj_buf[known].slot[k] * 4;
++        MLOG("DM_PROJ_2D: the uniform buffer at %#llx holds the interface's own transform at the rows %llu to %llu (x scale %g)",
++             (unsigned long long)addr, (unsigned long long)g_proj_buf[known].slot[k], (unsigned long long)(g_proj_buf[known].slot[k] + 3), r0[0]);
++    }
+     if (!g_proj_buf[known].ncand) {   // nothing of the picture's shape: the beginning of the buffer is written, so the next run shows what it holds
+         MLOG("DM_PROJ_WIDEN: the uniform buffer at %#llx holds no matrix of the picture's shape; it starts with (%g,%g,%g,%g) (%g,%g,%g,%g) (%g,%g,%g,%g) (%g,%g,%g,%g)",
+              (unsigned long long)addr, f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7], f[8], f[9], f[10], f[11], f[12], f[13], f[14], f[15]);
+@@ -1212,6 +1292,19 @@
+ }
+ // The host's copy of the game's upload: the row that the vertex shader multiplies for clip.x is scaled, which widens the
+ // horizontal field of view by the factor the picture is stretched by. The game's own memory and the GPU read the same matrix.
++// DM_PROJ_WIDEN: how much the x scale of a matrix is multiplied by.  The host writes the corrected matrix back into the
++// game's own memory, so the bytes that are uploaded can be the game's own matrix (the aspect of the picture), the matrix
++// the host corrected once (the aspect of the picture divided by the scale) or one that was corrected twice (divided by the
++// scale again).  Correcting a matrix that was corrected already would widen the field of view a second time: the picture
++// would jump by the factor the scale is.  The aspect of the bytes says which one it is.
++static float proj_correction(const float *m) {
++    double xs = fabs((double)m[0]), ys = fabs((double)m[5]);   // the x and y scales, in row-major and column-major alike
++    if (!(xs > 1e-9) || !(ys > 1e-9)) return g_proj_scale;     // the matrix is not readable here: the old way
++    int gen = proj_gen_of(ys / xs);
++    if (gen == 1) return 1.0f;                    // the host's own correction: nothing to do
++    if (gen == 2) return 1.0f / g_proj_scale;     // corrected twice: put it back where it belongs
++    return g_proj_scale;                          // the game's own matrix: correct it
++}
+ static void proj_scale_upload(uint8_t *ring, uint64_t dst, uint64_t n) {
+     if (g_proj_scale == 1.0f || !g_proj_nbuf) return;
+     for (int i = 0; i < g_proj_nbuf; i++) {
+@@ -1219,11 +1312,21 @@
+         for (int k = 0; k < b->n; k++) {
+             if (!proj_kind_on(b->kind[k])) continue;   // the 2D layer can be left alone
+             uint64_t base = b->addr + b->slot[k] * 16;
++            float f = g_proj_scale;
++            if (b->kind[k] == 2) {
++                if (base >= dst && base + 16 <= dst + n) {
++                    double own = 0.0;
++                    int gen = proj_2d_gen(fabs((double)*(const float *)(ring + (base - dst))), &own);
++                    if (gen == 1) f = 1.0f;                    // the host's own correction: nothing to do
++                    else if (gen == 2) f = 1.0f / g_proj_scale; // corrected twice: put it back where it belongs
++                }
++            } else if (base >= dst && base + 24 <= dst + n) f = proj_correction((const float *)(ring + (base - dst)));
++            if (f == 1.0f) continue;                    // the bytes carry the correction already
+             for (int j = 0; j < 4; j++) {
+                 uint64_t fa = base + (b->col[k] ? (uint64_t)j * 16 : (uint64_t)j * 4);   // the x scale of the row, or the x component of the column
+                 if (fa + 4 <= dst || fa >= dst + n) continue;   // not in this upload
+                 float *fp = (float *)(ring + (fa - dst));
+-                *fp *= g_proj_scale;
++                *fp *= f;
+             }
+         }
+     }
+@@ -1252,10 +1355,18 @@
+         for (int k = 0; k < b->n; k++) {
+             if (!proj_kind_on(b->kind[k])) continue;
+             uint64_t base = addr + b->slot[k] * 16;
++            float f = g_proj_scale;
++            if (b->kind[k] == 2) {
++                double own = 0.0;
++                int gen = proj_2d_gen(fabs((double)*(const float *)base), &own);
++                if (gen == 1) f = 1.0f;
++                else if (gen == 2) f = 1.0f / g_proj_scale;
++            } else if (base + 24 <= addr + need) f = proj_correction((const float *)base);   // the game's own bytes: what generation are they
++            if (f == 1.0f) continue;
+             for (int j = 0; j < 4; j++) {
+                 uint64_t fa = base + (b->col[k] ? (uint64_t)j * 16 : (uint64_t)j * 4);   // the x scale of the row, or the x component of the column
+                 if (fa + 4 > addr + need) continue;
+-                *(float *)(dst + (fa - addr)) *= g_proj_scale;
++                *(float *)(dst + (fa - addr)) *= f;
+             }
+         }
+         *gpu_out = buf.gpuAddress + off;
+@@ -8441,6 +8552,7 @@
+ // is scaled up to cover the canvas (and cropped) instead, so it is never stretched wrongly.
+ static void proj_wide_viewport(double dw, double dh, double cw, double ch, MTLViewport *vp) {
+     g_proj_src_aspect = cw / ch;
++    g_proj_src_w = (int)cw; g_proj_src_h = (int)ch;   // the picture's own size: the interface's pixel scales are 1/cw and 1/ch
+     double k = (dw / dh) / g_proj_src_aspect;
+     if (proj_widen_on() && g_proj_nbuf && k > 0.01) {
+         g_proj_scale = (float)(1.0 / k);

@@ -1,0 +1,14 @@
+diff --git a/dm/ios/Sources/front_ios.m b/dm/ios/Sources/front_ios.m
+--- a/dm/ios/Sources/front_ios.m
++++ b/dm/ios/Sources/front_ios.m
+@@ -30,8 +30,10 @@
+     if (g_wide < 0) { const char *e = getenv("DM_ASPECT"); g_wide = DM_GAME_ASPECT_ANY && !(e && !strcmp(e, "16:9")); }
+     return g_wide;
+ }
++static int dm_screen_fill_mode(void);   // further down, with the chrome
+ double front_ios_canvas_aspect(CGSize b) {   // DmGamepad.m maps touches on the same canvas
+     double a = b.width > 0 && b.height > 0 ? fmax(b.width, b.height) / fmin(b.width, b.height) : 16.0 / 9.0;
++    if (dm_screen_fill_mode() == 2) return a;   // DM_SCREEN_FILL=stretch: the picture is drawn over the whole screen, so a tap is mapped on the screen's own shape
+     return front_ios_wide() ? fmax(a, 16.0 / 9.0) : 16.0 / 9.0;
+ }
+ double front_screen_aspect(void) { return front_ios_wide() ? g_canvas_aspect : 0; }   // set on the main thread before the host starts the game (startGame)

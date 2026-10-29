@@ -1,0 +1,21 @@
+diff --git a/dm/ios/Sources/front_ios.m b/dm/ios/Sources/front_ios.m
+--- a/dm/ios/Sources/front_ios.m
++++ b/dm/ios/Sources/front_ios.m
+@@ -602,6 +602,17 @@
+ static void front_ios_audio_apply(void) { dm_audio_suspend(g_audio_bg || g_audio_intr); }
+ static void front_ios_audio_watch(void) {
+     NSNotificationCenter *nc = NSNotificationCenter.defaultCenter;
++    // The system's own output volume, watched: a game that is silent while the host's PCM is not (the audio level
++    // line) means the phone's media volume is at 0. The value is printed when it changes, so the volume the player
++    // set is in the log.
++    static float last_vol = -1.f;
++    [NSTimer scheduledTimerWithTimeInterval:1.0 repeats:YES block:^(NSTimer *t) {
++        AVAudioSession *s = AVAudioSession.sharedInstance;
++        float v = s.outputVolume;
++        if (fabsf(v - last_vol) > 0.001f) { last_vol = v;
++            LOG("audio session: the system's output volume is now %.2f (route %s)", v,
++                (s.currentRoute.outputs.description ?: @"(no output)").UTF8String); }
++    }];
+     [nc addObserverForName:AVAudioSessionInterruptionNotification object:nil queue:NSOperationQueue.mainQueue usingBlock:^(NSNotification *n) {
+         NSUInteger type = [n.userInfo[AVAudioSessionInterruptionTypeKey] unsignedIntegerValue], reason = [n.userInfo[AVAudioSessionInterruptionReasonKey] unsignedIntegerValue];
+         if (type == AVAudioSessionInterruptionTypeBegan) { LOG("audio session: interrupted (reason %lu)", (unsigned long)reason); g_audio_intr = 1; }

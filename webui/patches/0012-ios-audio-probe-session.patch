@@ -1,0 +1,33 @@
+diff --git a/dm/ios/Sources/front_ios.m b/dm/ios/Sources/front_ios.m
+--- a/dm/ios/Sources/front_ios.m
++++ b/dm/ios/Sources/front_ios.m
+@@ -194,12 +194,27 @@
+ static int g_session_off;   // the last activation failed (another app or a call still held the session): tried again when the app becomes active
+ void front_ios_audio_session(void) {
+     AVAudioSession *s = AVAudioSession.sharedInstance; NSError *e = nil;
+-    if (![s setCategory:AVAudioSessionCategorySoloAmbient error:&e]) LOG("[RED] audio session category could not be set: %s", e.localizedDescription.UTF8String);
++    // The category: a game wants Playback. SoloAmbient is the one category the ringer's silent switch
++    // silences, and iPadOS 26+ implements that as a software mute on the speaker inside the virtual audio
++    // device ("Disabling software mute on VAD [Speaker]" in the system log): the session was active and the
++    // AudioUnit was running, but the speaker stayed muted. DM_AUDIO_CATEGORY picks the category at run time
++    // (playback by default, soloambient / ambient to go back to the old behaviour).
++    NSString *pick = getenv("DM_AUDIO_CATEGORY") ? @(getenv("DM_AUDIO_CATEGORY")) : @"playback";
++    NSString *want = [pick.lowercaseString isEqualToString:@"soloambient"] ? AVAudioSessionCategorySoloAmbient
++                  : [pick.lowercaseString isEqualToString:@"ambient"] ? AVAudioSessionCategoryAmbient
++                  : AVAudioSessionCategoryPlayback;
++    if (![s setCategory:want error:&e]) {
++        LOG("[RED] audio session category %s could not be set: %s", want.UTF8String, e.localizedDescription.UTF8String);
++        if (![s setCategory:AVAudioSessionCategorySoloAmbient error:&e]) LOG("[RED] audio session category SoloAmbient could not be set either: %s", e.localizedDescription.UTF8String);
++    }
+     [s setPreferredSampleRate:48000 error:nil];
+     if (![s setPreferredIOBufferDuration:0.005 error:&e]) LOG("[RED] audio session I/O buffer duration could not be set: %s", e.localizedDescription.UTF8String);
+     g_session_off = ![s setActive:YES error:&e];
+     if (g_session_off) LOG("[RED] audio session activation failed: %s", e.localizedDescription.UTF8String);
+-    LOG("audio session: sample rate %.0f Hz, I/O buffer %.2f ms (asked for 5 ms)", s.sampleRate, s.IOBufferDuration * 1000);
++    LOG("audio session: category %s, sample rate %.0f Hz, I/O buffer %.2f ms (asked for 5 ms)", s.category.UTF8String, s.sampleRate, s.IOBufferDuration * 1000);
++    {   // Probe: the system's own output volume and the route the session plays through.
++        NSString *desc = s.currentRoute.outputs.description ?: @"(no output)";
++        LOG("[RED] audio session probe: output volume %.2f, output channels %u, other audio playing %d, route %s", s.outputVolume, (unsigned)s.outputNumberOfChannels, (int)s.isOtherAudioPlaying, desc.UTF8String); }
+ }
+ 
+ // Real audio output is suspended (the silent sink paces the game) while the app is in the background or another audio session has interrupted ours (Siri, an alarm, a call).

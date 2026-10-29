@@ -1,0 +1,56 @@
+diff --git a/dm/ios/Sources/front_ios.m b/dm/ios/Sources/front_ios.m
+--- a/dm/ios/Sources/front_ios.m
++++ b/dm/ios/Sources/front_ios.m
+@@ -61,9 +61,10 @@
+ // ===== The letterbox chrome =====
+ // The 16:9 picture sits in the middle of the screen, so a black bar is left around it: above and below on
+ // a 4:3 tablet, on the sides in 19:5 on a phone. Those bars are put to use: a backdrop (the player's own
+-// image, dropped into Documents/frame.png, or a gradient), a reflection of the picture mirrored into a bar
+-// and fading out, and the shortcut buttons. Every part can be switched off from the device
+-// (DM_CHROME / DM_REFLECT / DM_VOLUME in Documents/env.txt; no rebuild needed).
++// image, dropped into Documents/frame.png, or a gradient), the shortcut buttons, and (off by default) a
++// reflection of the picture mirrored into a bar and fading out. The reflection is off by default: a mirrored
++// menu is read as a second, upside-down copy of the options and is confusing. Every part can be switched from
++// the device (DM_CHROME / DM_REFLECT / DM_VOLUME in Documents/env.txt; no rebuild needed).
+ @class DmChromeBar;
+ 
+ static BOOL env_on(const char *name, int fallback) { const char *e = getenv(name); return e ? atoi(e) != 0 : fallback != 0; }
+@@ -158,7 +159,10 @@
+     [b setTitle:title forState:UIControlStateNormal];
+     [b setTitleColor:UIColor.whiteColor forState:UIControlStateNormal];
+     b.titleLabel.font = [UIFont systemFontOfSize:13 weight:UIFontWeightSemibold];
+-    b.backgroundColor = [UIColor colorWithWhite:1 alpha:0.14];
++    // The host's own buttons are painted in its own colour: a white outline over the picture is hard to see and
++    // is easily taken for part of the game.
++    b.backgroundColor = [UIColor colorWithRed:0.12 green:0.32 blue:0.82 alpha:0.52];
++    b.layer.borderWidth = 1; b.layer.borderColor = [UIColor colorWithRed:0.42 green:0.68 blue:1.00 alpha:0.95].CGColor;
+     b.layer.cornerRadius = 8; b.layer.masksToBounds = YES;
+     b.contentEdgeInsets = UIEdgeInsetsMake(6, 12, 6, 12);
+     [b addTarget:self action:action forControlEvents:UIControlEventTouchUpInside];
+@@ -174,7 +178,7 @@
+         for (UIButton *b in self.buttons) [self addSubview:b];
+         UISlider *s = [[UISlider alloc] init];
+         s.minimumValue = 0; s.maximumValue = 2; s.value = 1;
+-        s.minimumTrackTintColor = UIColor.whiteColor;
++        s.minimumTrackTintColor = [UIColor colorWithRed:0.42 green:0.68 blue:1.00 alpha:0.95];
+         s.maximumTrackTintColor = [UIColor colorWithWhite:1 alpha:0.25];
+         [s addTarget:self action:@selector(onVol:) forControlEvents:UIControlEventValueChanged];
+         self.volume = s;
+@@ -334,7 +338,7 @@
+         [host addSublayer:il];
+         g_backdrop_image = il;
+     }
+-    if (env_on("DM_REFLECT", 1)) {
++    if (env_on("DM_REFLECT", 0)) {
+         CALayer *r = [CALayer layer];
+         r.contentsGravity = kCAGravityResizeAspect;
+         [host addSublayer:r];
+@@ -358,7 +362,7 @@
+         g_reflect_link.preferredFrameRateRange = CAFrameRateRangeMake(10, 30, 30);   // the reflection does not need the full frame rate
+         [g_reflect_link addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes];
+     }
+-    LOG("front end: letterbox chrome on (backdrop %s, reflection %s)", im ? "image" : "gradient", env_on("DM_REFLECT", 1) ? "on" : "off");
++    LOG("front end: letterbox chrome on (backdrop %s, reflection %s)", im ? "image" : "gradient", env_on("DM_REFLECT", 0) ? "on" : "off");
+ }
+ 
+ // The reflection shows the picture's last presented frame, mirrored into a bar. The game layer keeps the

@@ -1,0 +1,36 @@
+diff --git a/dm/ios/Sources/DmGamepad.m b/dm/ios/Sources/DmGamepad.m
+--- a/dm/ios/Sources/DmGamepad.m
++++ b/dm/ios/Sources/DmGamepad.m
+@@ -118,6 +118,7 @@
+ }
+ 
+ static UIColor *k_idle, *k_on, *k_line, *k_ringFill, *k_text, *k_textOn;
++static UIColor *k_hostFill, *k_hostOn, *k_hostLine, *k_hostText;   // the host's own buttons (the volume and the layout switch)
+ static CAShapeLayer *shape(CALayer *parent) {
+     CAShapeLayer *l = [CAShapeLayer layer];
+     l.fillColor = k_idle.CGColor; l.strokeColor = k_line.CGColor; l.lineWidth = 1.5;
+@@ -145,6 +146,11 @@
+             // each colour carries its own low opacity instead of lowering the whole view's alpha (that would add an off-screen pass for the full-screen layer)
+             k_idle = [UIColor colorWithWhite:1 alpha:0.14]; k_on = [UIColor colorWithWhite:1 alpha:0.45]; k_line = [UIColor colorWithWhite:1 alpha:0.38];
+             k_ringFill = [UIColor colorWithWhite:1 alpha:0.06]; k_text = [UIColor colorWithWhite:1 alpha:0.6]; k_textOn = [UIColor colorWithWhite:0 alpha:0.7];
++            // The host's own buttons get a colour of their own: the game's keys stay neutral, so the two are not mixed up.
++            k_hostFill = [UIColor colorWithRed:0.12 green:0.32 blue:0.82 alpha:0.46];
++            k_hostOn = [UIColor colorWithRed:0.22 green:0.48 blue:1.00 alpha:0.80];
++            k_hostLine = [UIColor colorWithRed:0.42 green:0.68 blue:1.00 alpha:0.95];
++            k_hostText = [UIColor colorWithWhite:1 alpha:0.95];
+         });
+         _controls = [CALayer layer]; [self.layer addSublayer:_controls];
+         _ring = shape(_controls); _ring.fillColor = k_ringFill.CGColor;
+@@ -411,6 +417,12 @@
+     for (int b = 0; b < B_N; b++) { BOOL on = (all >> b) & 1;
+         _key[b].fillColor = (on ? k_on : k_idle).CGColor; _label[b].foregroundColor = (on ? k_textOn : k_text).CGColor; }
+     _swap.fillColor = (_swapHeld ? k_on : k_idle).CGColor; _swapLabel.foregroundColor = (_swapHeld ? k_textOn : k_text).CGColor;
++    // The host's own buttons at the top (the volume − / + and the layout switch) are painted in the host's colour.
++    for (int b = 0; b < B_N; b++) if (b == B_MINUS || b == B_PLUS) { BOOL on = (all >> b) & 1;
++        _key[b].fillColor = (on ? k_hostOn : k_hostFill).CGColor; _key[b].strokeColor = k_hostLine.CGColor;
++        _label[b].foregroundColor = k_hostText.CGColor; }
++    _swap.fillColor = (_swapHeld ? k_hostOn : k_hostFill).CGColor; _swap.strokeColor = k_hostLine.CGColor;
++    _swapLabel.foregroundColor = k_hostText.CGColor;
+     CGPoint h = self.stickHome, o = [self knobOffset:0];
+     _knob.position = CGPointMake(h.x + o.x, h.y + o.y); _knob.fillColor = (_stick[0] ? k_on : k_idle).CGColor;
+     [CATransaction commit];
