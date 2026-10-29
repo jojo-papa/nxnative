@@ -1,0 +1,12 @@
+diff --git a/dm/gfx/nvn/nvn_mtl.m b/dm/gfx/nvn/nvn_mtl.m
+index 117450c..d9d075b 100644
+--- a/dm/gfx/nvn/nvn_mtl.m
++++ b/dm/gfx/nvn/nvn_mtl.m
+@@ -10491,6 +10491,7 @@
+ #define FX_REMAKE_PRESENTS 30
+ typedef struct { id<MTL4FXSpatialScaler> sc; id<MTLTexture> in, out; uint64_t made_at; int made; NSUInteger refused[6]; } fx_state;
+ static fx_state g_fx_present;   // only the present thread encodes or replaces the scaler
++#include "nvn_fx.inc"   // the HUD reads the scaler's state (rule R-02: the upstream has the scaler)
+ static id<MTL4Compiler> g_fx_comp;
+ static int g_fx_mode = -1;   // 1 = metalfx, 0 = off
+ static int fx_mode(void) {

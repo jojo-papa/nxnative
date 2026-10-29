@@ -1,0 +1,31 @@
+# 功能开关注册表：这个项目的唯一事实来源。
+#
+# 一行一个独立功能。启动页按这张表生成开关；运行时的取值顺序是
+#   用户在启动页保存的选择  >  Documents/env.txt  >  App 包里的默认值  >  本表的 default
+# 用户改完开关直接生效，不用重新安装、不用重新打包。
+#
+# scope=runtime：宿主在运行时读 env 列的变量，用户不重装就能改。
+# scope=build  ：编译期就定死了（源码里写死的、或只是构建工具链的一部分），运行时改不了。
+#                这类功能必须在 note 里写清楚「关不掉，为什么」；规则 R-09 对它有明确豁免。
+#
+# 规则 R-09/R-10 的检查会验证：scope=runtime 的功能，它的 env 变量必须真的出现在
+# 该功能关联的补丁或 webui/overlays/ 的源文件里 —— 也就是说这个开关是真的接上的，
+# 不是只在表里写了个名字。
+#
+# 列：id  label  group  scope  env  values  default  note
+id	label	group	scope	env	values	default	note
+picture.fill	画面填充方式	画面	runtime	DM_SCREEN_FILL	fit,cover,stretch,wide	fit	fit 按比例留黑边；cover 放大到铺满、裁掉边缘；stretch 拉满、画面会变形；wide 让游戏按屏幕比例渲染
+picture.aspect	输出比例	画面	runtime	DM_ASPECT	16:9,any	16:9	any 让游戏按屏幕比例渲染，需要游戏自己支持
+picture.chrome	界面边框	画面	runtime	DM_CHROME	0,1	1	关掉后画面四周没有边框与按键，画面角落会出现一个恢复按钮
+picture.reflect	黑边反射	画面	runtime	DM_REFLECT	0,1	0	把画面镜像到黑边里，默认关（镜像菜单看着像第二屏）
+picture.proj_widen	投影加宽	画面	runtime	DM_PROJ_WIDEN	0,1	0	把横向视野按画面被拉伸的比例加宽，HUD 与深度不变
+audio.gain	音量增益	音频	runtime	DM_AUDIO_GAIN_OVERRIDE	float	1	强制输出的增益倍数，0 表示不强制、用游戏自己的
+audio.mute	静音	音频	runtime	DM_AUDIO_MUTE	0,1	0	关掉游戏的声音
+rumble.gain	震动强度	手感	runtime	DM_RUMBLE_GAIN	float	1	手柄与手机震动的强度
+rumble.permit	允许游戏震动	手感	runtime	DM_RUMBLE_PERMIT	0,1	1	游戏问「能不能震动」时一律回答可以；关掉后游戏自己会停震
+perf.hud	性能信息	诊断	runtime	DM_METAL_HUD	0,1	0	显示 FPS、输入输出分辨率与内存占用
+proj.probe	投影诊断探针	诊断	runtime	DM_NVN_PROJ	0,1	0	逐帧记录顶点着色器绑定的 uniform 里的投影矩阵，用来定位画面比例问题；会刷日志
+debug.textures	调试贴图绑定	诊断	runtime	DM_NVN_DRAW_TEXTURES	0,1	0	把每次绘制的贴图绑定记进 draw-textures.tsv（约 64 MiB），会拖慢性能
+metalfx.spatial	MetalFX 空间放大	画面	runtime	DM_PRESENT_UPSCALE	metalfx,off	off	用上游的 MetalFX 空间放大（DM_PRESENT_UPSCALE=metalfx）：画面按屏幕比例放大，耗 GPU 与发热；off 是普通双线性
+ui.zh_dialogs	中文对话框	界面	build	-	-	-	系统对话框的中文文案是编译期替换的，运行时改不了；要关只能换一个语言重新构建
+toolchain.windows	Windows 构建适配	工具链	build	-	-	-	POSIX 路径、zstd 模块回退等：只影响在 Windows 上能不能构建出来，跟玩家的画面无关

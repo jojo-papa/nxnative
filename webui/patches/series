@@ -1,0 +1,20 @@
+# <patch file> <repository-relative target>
+# Base: ac9598ad83e2706881568cafe345d262459ccd05
+# Fork ref: c586dd15b01e52cb7a31732163786ab4a54101b9
+#
+# The order is the order the patches apply in, and rule R-11 asks for the base
+# modifications first and the custom ones after: 0054 is a customization (it
+# reads the upstream's own MetalFX upscaler into the performance HUD), so it
+# goes last.
+#
+# 0005 and 0006 are gone: the upstream's own Makefile already links MetalFX
+# and the upstream ships its own MetalFX spatial upscaling (DM_PRESENT_UPSCALE),
+# so the fork does not build a second one (rule R-02, R-15).
+0001-shader-split-posix-paths.patch dm/gfx/tools/shader_split.py
+0002-gen-embed-posix-paths-sections.patch dm/ios/tools/gen_embed.py
+0003-hle-count-targetconditionals.patch dm/host/hle_count.c
+0004-nx-extract-catalog.patch dm/tools/nx_extract/Program.cs
+0007-main-launch-settings.patch dm/ios/Sources/main.m
+0008-build-ipa-launch-defaults.patch dm/ios/tools/build_ipa.sh
+0009-build-ipa-from-nsp-webui.patch scripts/build_ipa_from_nsp.py
+0054-present-upscale-hud.patch dm/gfx/nvn/nvn_mtl.m
