@@ -29,14 +29,14 @@ python webui/tools/rules.py --rule R-11 --json
 > 定时任务把上游 seedds/nxnative 的 main 抓到 daily 分支，并把本仓库的 fork 提交 rebase 到它上面。
 
 - 检查：`webui/tools/daily_sync.py --plan`
-- 状态：`planned`（工具待建）
-- 违反时：工具建好后由它负责抓取、rebase 与决策，本条随之变为 `active`。
+- 状态：`active`
+- 违反时：跑 `python webui/tools/daily_sync.py --run`：它负责抓取、rebase、补丁重放与跑门，绿了才提升 main。
 
 **R-02** 冲突时基线优先
 > 补丁重放到新基线时，若基线已经包含我们的等价改动，就丢弃我们的补丁、用基线的版本；只有基线没覆盖的部分才重做。
 
 - 检查：`webui/tools/patch_rebase.py`
-- 状态：`planned`（工具待建）
+- 状态：`active`
 - 违反时：它要对每条补丁给出 `KEEP` / `DROP_BASELINE_HAS_IT` / `PARTIAL` / `NEEDS_MANUAL` 之一；出现 `NEEDS_MANUAL` 就不许提升 main。
 
 **R-03** 测试门
@@ -47,7 +47,7 @@ python webui/tools/rules.py --rule R-11 --json
 - 违反时：跑 `python webui/tools/gate.py --json` 看哪一项红。
 
 **R-04** 主分支只进不退
-> main 只能由一次绿灯的 daily 快进得到；任何失败、任何红灯都不许动 main。
+> main 只能由一次绿灯的 daily 得到；任何失败、任何红灯都不许动 main。
 
 - 检查：main 包含 webui/patches/UPSTREAM_BASE 记录的上游提交
 - 状态：`active`

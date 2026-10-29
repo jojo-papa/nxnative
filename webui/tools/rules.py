@@ -44,18 +44,18 @@ PLANNED = 'planned'    # the rule is in force; its check arrives with the named 
 # id, section, title, statement, status, check id, what to do when it fails
 RULES = [
     {
-        'id': 'R-01', 'section': 'baseline', 'status': PLANNED,
+        'id': 'R-01', 'section': 'baseline', 'status': ACTIVE,
         'title': '每日重建 daily 分支',
         'rule': '定时任务把上游 seedds/nxnative 的 main 抓到 daily 分支，并把本仓库的 fork 提交 rebase 到它上面。',
         'check': 'webui/tools/daily_sync.py --plan',
-        'fix': '工具还没建。建好后由它负责抓取、rebase 与决策，本条规则随之变为 active。',
+        'fix': '跑 python webui/tools/daily_sync.py --run：它负责抓取、rebase、补丁重放与跑门，绿了才提升 main。',
     },
     {
-        'id': 'R-02', 'section': 'baseline', 'status': PLANNED,
+        'id': 'R-02', 'section': 'baseline', 'status': ACTIVE,
         'title': '冲突时基线优先',
         'rule': '补丁重放到新基线时，若基线已经包含我们的等价改动，就丢弃我们的补丁、用基线的版本；只有基线没覆盖的部分才重做。',
         'check': 'webui/tools/patch_rebase.py',
-        'fix': '工具还没建。它要对每条补丁给出 KEEP / DROP_BASELINE_HAS_IT / PARTIAL / NEEDS_MANUAL 之一。',
+        'fix': '它要对每条补丁给出 KEEP / DROP_BASELINE_HAS_IT / PARTIAL / NEEDS_MANUAL 之一；出现 NEEDS_MANUAL 就不许提升 main。',
     },
     {
         'id': 'R-03', 'section': 'baseline', 'status': ACTIVE,
@@ -67,7 +67,7 @@ RULES = [
     {
         'id': 'R-04', 'section': 'baseline', 'status': ACTIVE,
         'title': '主分支只进不退',
-        'rule': 'main 只能由一次绿灯的 daily 快进得到；任何失败、任何红灯都不许动 main。',
+        'rule': 'main 只能由一次绿灯的 daily 得到；任何失败、任何红灯都不许动 main。',
         'check': 'main 包含 webui/patches/UPSTREAM_BASE 记录的上游提交',
         'fix': 'main 被改动了。回退到最近一次绿灯的提交，或重新跑一次 daily 让它绿灯。',
     },
@@ -523,7 +523,31 @@ def check_r16_build_outputs_stay_out():
     return [(not problems, '; '.join(problems) or '构建产物 out/ 既不进 git，也不进 stage 树')]
 
 
+def check_r01_daily_branch_follows_upstream():
+    """The daily branch has to carry the upstream's latest commit."""
+    if not git_ok('rev-parse', '--verify', 'refs/heads/daily'):
+        return [(True, '还没有 daily 分支 —— 第一次每日重建之前不算违规')]
+    if git_ok('merge-base', '--is-ancestor', 'upstream/main', 'daily'):
+        return [(True, 'daily 包含上游的最新提交')]
+    return [(False, 'daily 不包含上游的最新提交 —— 每日重建没有跟上')]
+
+
+def check_r02_rebase_engine_exists():
+    """The patch rebase engine must give every patch a verdict."""
+    tool = ROOT / 'webui' / 'tools' / 'patch_rebase.py'
+    if not tool.is_file():
+        return [(False, 'webui/tools/patch_rebase.py 不存在')]
+    text = tool.read_text(encoding='utf-8')
+    missing = [name for name in ('KEEP', 'DROP_BASELINE_HAS_IT', 'PARTIAL', 'NEEDS_MANUAL')
+               if name not in text]
+    if missing:
+        return [(False, f'patch_rebase.py 里没有这些判定：{", ".join(missing)}')]
+    return [(True, '补丁重放决策引擎在位，每条补丁都会得到四种判定之一')]
+
+
 CHECKS = {
+    'R-01': check_r01_daily_branch_follows_upstream,
+    'R-02': check_r02_rebase_engine_exists,
     'R-03': check_r03_gate_covers_four,
     'R-04': check_r04_main_never_goes_back,
     'R-05': check_r05_stage_gate_is_in_the_gate,
